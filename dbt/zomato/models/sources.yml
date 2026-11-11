@@ -1,0 +1,27 @@
+version: 2
+
+sources:
+  - name: gold
+    description: Batch aggregates written by the Spark gold job (Airflow-scheduled)
+    schema: gold
+    tables:
+      - name: daily_city_metrics
+      - name: restaurant_performance
+      - name: hourly_demand
+      - name: rider_daily
+      - name: payment_mix
+      - name: dq_quarantine_daily
+      - name: customer_cohorts
+      - name: customer_segments
+      - name: customer_monthly
+      - name: basket_mix
+      - name: rating_matrix
+      - name: coupon_performance
+
+  - name: dims
+    description: Reference data loaded by the event generator
+    schema: dims
+    tables:
+      - name: restaurants
+      - name: customers
+      - name: riders

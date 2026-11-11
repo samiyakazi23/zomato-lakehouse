@@ -1,0 +1,18 @@
+apiVersion: 1
+datasources:
+  - name: Zomato Warehouse
+    uid: zomato-pg
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: grafana
+    database: zomato
+    isDefault: true
+    jsonData:
+      database: zomato
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+      maxOpenConns: 10
+    secureJsonData:
+      password: grafana

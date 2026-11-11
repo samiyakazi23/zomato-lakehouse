@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+dbt/zomato/target/
+dbt/zomato/logs/
+.DS_Store
+.user.yml

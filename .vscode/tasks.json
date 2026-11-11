@@ -1,0 +1,44 @@
+{
+  // Run these from VS Code: Terminal > Run Task...  (or Cmd+Shift+P > "Tasks: Run Task")
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start project (Lite)",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.lite.yml up -d --build && echo '' && echo 'Website: http://localhost:8000   Airflow: http://localhost:8080 (admin/admin)'",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start project (Standard, 16 GB+)",
+      "type": "shell",
+      "command": "docker compose up -d --build && echo '' && echo 'Website: http://localhost:8000'",
+      "problemMatcher": []
+    },
+    {
+      "label": "Stop project (keeps data)",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.lite.yml stop; docker compose stop",
+      "problemMatcher": []
+    },
+    {
+      "label": "Show status",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.lite.yml ps",
+      "problemMatcher": []
+    },
+    {
+      "label": "Watch live orders",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.lite.yml logs -f --tail=30 generator spark-streaming",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Delete everything (reset)",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.lite.yml down -v; docker compose down -v",
+      "problemMatcher": []
+    }
+  ]
+}

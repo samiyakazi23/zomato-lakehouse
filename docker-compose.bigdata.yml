@@ -1,0 +1,77 @@
+# =====================================================================
+#  Billion-scale profile (overlay on docker-compose.yml)
+#
+#    docker compose -f docker-compose.yml -f docker-compose.bigdata.yml up -d --build
+#    (or: make bigdata)
+#
+#  Needs ~20 GB RAM for Docker, 10+ CPU cores and ~150 GB free disk.
+#  - 3 Spark workers x 3 cores x 3 GB  (streaming gets 3 cores, batch/backfill gets 6)
+#  - 1 billion-order history (~23 GB), 10x bigger dimensions
+#  - 4 generator processes at 400 orders/sec  => ~8k events/sec  => ~700M events/day
+# =====================================================================
+
+x-bigdata-airflow-env: &bigdata-airflow-env
+  SPARK_CORES_MAX: "6"
+  SPARK_EXECUTOR_CORES: "3"
+  SPARK_DRIVER_MEMORY: 2g
+  SPARK_EXECUTOR_MEMORY: 2500m
+  BACKFILL_ORDERS: "1000000000"
+
+x-bigdata-worker-env: &bigdata-worker-env
+  SPARK_WORKER_CORES: "3"
+  SPARK_WORKER_MEMORY: 3g
+  SPARK_DAEMON_MEMORY: 512m
+  SPARK_WORKER_DIR: /tmp/spark-work
+
+services:
+  generator:
+    environment:
+      ORDERS_PER_SEC: "400"
+      GENERATOR_PROCESSES: "4"
+      NUM_RESTAURANTS: "100000"
+      NUM_CUSTOMERS: "1000000"
+      NUM_RIDERS: "150000"
+
+  kafka:
+    environment:
+      KAFKA_HEAP_OPTS: -Xmx2G -Xms2G
+      KAFKA_LOG_RETENTION_HOURS: 6
+      KAFKA_LOG_RETENTION_BYTES: 2147483648
+      KAFKA_NUM_NETWORK_THREADS: 6
+      KAFKA_NUM_IO_THREADS: 8
+
+  spark-worker-1:
+    environment: *bigdata-worker-env
+  spark-worker-2:
+    environment: *bigdata-worker-env
+  spark-worker-3:
+    image: zomato/spark:3.5.1
+    container_name: zomato-spark-worker-3
+    hostname: spark-worker-3
+    env_file: .env
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --webui-port 8081
+    environment: *bigdata-worker-env
+    volumes:
+      - ./spark/jobs:/opt/jobs:ro
+    depends_on:
+      - spark-master
+    ports:
+      - "8083:8081"
+    restart: unless-stopped
+
+  spark-streaming:
+    environment:
+      SPARK_CORES_MAX: "3"
+      SPARK_EXECUTOR_CORES: "3"
+      SPARK_DRIVER_MEMORY: 2g
+      SPARK_EXECUTOR_MEMORY: 2500m
+      MAX_OFFSETS_PER_TRIGGER: "1000000"
+      BRONZE_RETENTION_DAYS: "2"
+      RIDER_PINGS_RETENTION_DAYS: "2"
+
+  airflow-scheduler:
+    environment:
+      <<: *bigdata-airflow-env
+  airflow-webserver:
+    environment:
+      <<: *bigdata-airflow-env

@@ -1,0 +1,343 @@
+[
+ {
+  "question": "Which city had the slowest deliveries last week?",
+  "sql": "SELECT city, ROUND(SUM(c.avg_delivery_minutes * c.delivered_orders)::numeric / SUM(c.delivered_orders), 1) AS avg_minutes,\n       ROUND(AVG(k.late_rate)::numeric * 100, 1) AS late_pct\nFROM analytics.mart_kpi_history k JOIN analytics.mart_city_kpis c USING (order_date, city)\nWHERE order_date > (SELECT max(order_date) - 8 FROM analytics.mart_city_kpis) AND order_date < (SELECT max(order_date) FROM analytics.mart_city_kpis)\nGROUP BY city ORDER BY avg_minutes DESC",
+  "cols": [
+   "city",
+   "avg_minutes",
+   "late_pct"
+  ],
+  "rows": [
+   [
+    "Bengaluru",
+    39.0,
+    27.6
+   ],
+   [
+    "Mumbai",
+    37.9,
+    22.8
+   ],
+   [
+    "Delhi NCR",
+    37.2,
+    18.9
+   ],
+   [
+    "Kolkata",
+    36.2,
+    14.7
+   ],
+   [
+    "Pune",
+    36.0,
+    14.5
+   ],
+   [
+    "Chennai",
+    34.8,
+    11.4
+   ],
+   [
+    "Hyderabad",
+    34.6,
+    11.0
+   ],
+   [
+    "Ahmedabad",
+    34.2,
+    8.5
+   ],
+   [
+    "Lucknow",
+    34.1,
+    8.7
+   ],
+   [
+    "Jaipur",
+    33.3,
+    6.3
+   ]
+  ],
+  "answer": "Bengaluru was slowest at 39.0 minutes on average, with 27.6% of orders arriving late. Jaipur was fastest at 33.3 minutes (6.3% late).",
+  "model": "saved answer"
+ },
+ {
+  "question": "Top 5 restaurants in Mumbai by revenue",
+  "sql": "SELECT restaurant_name, cuisine, locality, orders, ROUND(gmv::numeric, 0) AS revenue_inr, avg_rating\nFROM analytics.mart_restaurant_rankings WHERE city = 'Mumbai' ORDER BY gmv DESC LIMIT 5",
+  "cols": [
+   "restaurant_name",
+   "cuisine",
+   "locality",
+   "orders",
+   "revenue_inr",
+   "avg_rating"
+  ],
+  "rows": [
+   [
+    "Tadka Biryani Point",
+    "Biryani",
+    "Thane West",
+    4635,
+    3713392.0,
+    3.91
+   ],
+   [
+    "Bawarchi Slice",
+    "Pizza",
+    "Colaba",
+    1832,
+    1549534.0,
+    3.42
+   ],
+   [
+    "Madras Biryani Point",
+    "Biryani",
+    "Lower Parel",
+    1783,
+    1004404.0,
+    4.17
+   ],
+   [
+    "Desi Mughlai Darbar",
+    "Mughlai",
+    "Powai",
+    872,
+    967596.0,
+    3.48
+   ],
+   [
+    "Swaad Brew House",
+    "Cafe",
+    "Andheri West",
+    1470,
+    898816.0,
+    3.51
+   ]
+  ],
+  "answer": "Tadka Biryani Point (Biryani, Thane West) leads Mumbai with \u20b937.13 lakh from 4,635 orders over the last 90 days. The top five are rated between 3.42 and 4.17 stars.",
+  "model": "saved answer"
+ },
+ {
+  "question": "How much do late deliveries hurt ratings?",
+  "sql": "SELECT late_bucket, ROUND(SUM(avg_rating * reviews)::numeric / SUM(reviews), 2) AS avg_rating,\n       ROUND(SUM(low_rating_share * reviews)::numeric / SUM(reviews) * 100, 1) AS one_or_two_star_pct, SUM(reviews) AS reviews\nFROM analytics.mart_rating_drivers GROUP BY late_bucket ORDER BY avg_rating DESC",
+  "cols": [
+   "late_bucket",
+   "avg_rating",
+   "one_or_two_star_pct",
+   "reviews"
+  ],
+  "rows": [
+   [
+    "On time",
+    4.11,
+    1.7,
+    600465.0
+   ],
+   [
+    "Up to 10 min late",
+    3.45,
+    11.2,
+    260090.0
+   ],
+   [
+    "10+ min late",
+    2.36,
+    57.5,
+    38543.0
+   ]
+  ],
+  "answer": "On-time orders average 4.11\u2605, but orders more than 10 minutes late drop to 2.36\u2605 and 57.5% of them get 1 or 2 stars (vs 1.7% when on time).",
+  "model": "saved answer"
+ },
+ {
+  "question": "Which coupons give the biggest discount per order?",
+  "sql": "SELECT coupon, SUM(orders) AS orders, ROUND((SUM(discount) / SUM(orders))::numeric, 0) AS discount_per_order,\n       ROUND((SUM(discount) / SUM(gmv) * 100)::numeric, 1) AS cost_pct_of_gmv\nFROM gold.coupon_performance WHERE coupon <> 'No coupon' GROUP BY coupon ORDER BY discount_per_order DESC",
+  "cols": [
+   "coupon",
+   "orders",
+   "discount_per_order",
+   "cost_pct_of_gmv"
+  ],
+  "rows": [
+   [
+    "WELCOME60",
+    90127.0,
+    114.0,
+    27.4
+   ],
+   [
+    "ZOMATO50",
+    270854.0,
+    95.0,
+    21.8
+   ],
+   [
+    "TRYNEW",
+    180108.0,
+    76.0,
+    16.7
+   ],
+   [
+    "GOLD20",
+    63307.0,
+    61.0,
+    13.2
+   ],
+   [
+    "SUPERSAVER",
+    298067.0,
+    57.0,
+    12.0
+   ]
+  ],
+  "answer": "WELCOME60 is the most generous at \u20b9114 off per order (27.4% of its order value), while SUPERSAVER costs just \u20b957 per order.",
+  "model": "saved answer"
+ },
+ {
+  "question": "Which customer segment brings the most revenue?",
+  "sql": "SELECT segment, SUM(customers) AS customers, ROUND(SUM(gmv)::numeric, 0) AS revenue_inr,\n       ROUND((SUM(gmv) / SUM(SUM(gmv)) OVER () * 100)::numeric, 1) AS revenue_share_pct\nFROM analytics.mart_customer_segments GROUP BY segment ORDER BY revenue_inr DESC",
+  "cols": [
+   "segment",
+   "customers",
+   "revenue_inr",
+   "revenue_share_pct"
+  ],
+  "rows": [
+   [
+    "Champions",
+    67487.0,
+    3436162673.0,
+    68.2
+   ],
+   [
+    "Loyal",
+    40850.0,
+    992449609.0,
+    19.7
+   ],
+   [
+    "Hibernating",
+    107757.0,
+    383696369.0,
+    7.6
+   ],
+   [
+    "At risk",
+    10898.0,
+    116911260.0,
+    2.3
+   ],
+   [
+    "Occasional",
+    30854.0,
+    76963358.0,
+    1.5
+   ],
+   [
+    "New",
+    18752.0,
+    33453210.0,
+    0.7
+   ]
+  ],
+  "answer": "Champions bring in 68.2% of all revenue (\u20b9343.62 crore) from just 67,487 customers. Loyal are next with 19.7%.",
+  "model": "saved answer"
+ },
+ {
+  "question": "Which restaurants raised prices recently?",
+  "sql": "SELECT restaurant_name, city, previous_cost, new_cost, new_cost - previous_cost AS increase, changed_at::date AS changed_on\nFROM analytics.mart_restaurant_changes WHERE new_cost > previous_cost ORDER BY changed_at DESC, increase DESC LIMIT 10",
+  "cols": [
+   "restaurant_name",
+   "city",
+   "previous_cost",
+   "new_cost",
+   "increase",
+   "changed_on"
+  ],
+  "rows": [
+   [
+    "Bombay Greens",
+    "Bengaluru",
+    1000,
+    1100,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Rasoi Dhaba",
+    "Mumbai",
+    650,
+    750,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Golden Fit Kitchen",
+    "Kolkata",
+    750,
+    850,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Saffron Dosa Corner",
+    "Chennai",
+    150,
+    250,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Desi Chinese Corner",
+    "Chennai",
+    650,
+    750,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Royal Burgers",
+    "Delhi NCR",
+    750,
+    850,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Royal Pizza Co.",
+    "Bengaluru",
+    450,
+    550,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Tandoori Biryani House",
+    "Chennai",
+    650,
+    750,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Chai Pizzeria",
+    "Hyderabad",
+    700,
+    800,
+    100,
+    "2026-10-24"
+   ],
+   [
+    "Chai Chinese Corner",
+    "Pune",
+    650,
+    750,
+    100,
+    "2026-10-24"
+   ]
+  ],
+  "answer": "10 recent price rises, led by Bombay Greens in Bengaluru (\u20b91000 \u2192 \u20b91100 for two). Captured by the dbt SCD2 snapshot of restaurant listings.",
+  "model": "saved answer"
+ }
+]

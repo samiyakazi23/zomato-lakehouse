@@ -1,0 +1,16 @@
+name: zomato
+version: "1.0.0"
+config-version: 2
+profile: zomato
+
+model-paths: ["models"]
+test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
+clean-targets: ["target"]
+
+models:
+  zomato:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

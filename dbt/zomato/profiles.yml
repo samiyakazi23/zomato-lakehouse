@@ -1,0 +1,12 @@
+zomato:
+  target: prod
+  outputs:
+    prod:
+      type: postgres
+      host: "{{ env_var('PG_HOST', 'postgres') }}"
+      port: "{{ env_var('PG_PORT', '5432') | as_number }}"
+      user: "{{ env_var('PG_USER', 'zomato') }}"
+      password: "{{ env_var('PG_PASSWORD', 'zomato') }}"
+      dbname: "{{ env_var('PG_DB', 'zomato') }}"
+      schema: analytics
+      threads: 4

@@ -1,0 +1,7 @@
+**/__pycache__
+dbt/zomato/target
+dbt/zomato/logs
+grafana
+postgres
+airflow
+*.md

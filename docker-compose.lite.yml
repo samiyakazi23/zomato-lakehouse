@@ -1,0 +1,243 @@
+# =====================================================================
+#  LITE MODE - for laptops with 8 GB RAM (works on Mac, Windows, Linux)
+#
+#    docker compose -f docker-compose.lite.yml up -d --build
+#
+#  Same pipeline, same website, smaller footprint (~5 GB RAM, ~12 GB disk):
+#   - Spark runs inside one container (local mode) instead of a master + 2 workers
+#   - no Grafana / Kafka UI (the website at http://localhost:8000 covers both)
+#   - 15 orders/sec live (~1.3M orders/day) and a 1 million order history
+#   - 1-day retention on raw events so the disk stays small
+#  Set Docker Desktop -> Settings -> Resources -> Memory to 5-6 GB.
+# =====================================================================
+
+x-lite-env: &lite-env
+  ORDERS_PER_SEC: "15"
+  NUM_CUSTOMERS: "60000"
+  NUM_RIDERS: "8000"
+  NUM_RESTAURANTS: "8000"
+  BACKFILL_ORDERS: "1000000"
+  BRONZE_RETENTION_DAYS: "1"
+  RIDER_PINGS_RETENTION_DAYS: "1"
+  SPARK_MASTER: "local[2]"
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  image: zomato/airflow:2.9.3
+  env_file: .env
+  environment:
+    <<: *lite-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__WEBSERVER__SECRET_KEY: zomato-lakehouse-secret
+    AIRFLOW__WEBSERVER__WORKERS: "1"
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "60"
+    SPARK_DRIVER_MEMORY: 1200m
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./spark/jobs:/opt/jobs:ro
+    - ./dbt:/opt/dbt:ro
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zomato-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    command: postgres -c shared_buffers=128MB -c max_connections=60
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost -d zomato"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # S3-compatible object store for the Delta Lake (SeaweedFS; MinIO no longer publishes free images)
+  s3:
+    image: chrislusf/seaweedfs:4.47
+    container_name: zomato-s3
+    hostname: s3
+    command: server -dir=/data -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=1024 -volume.max=0
+    ports:
+      - "9000:9000"   # S3 API
+      - "8888:8888"   # file browser: http://localhost:8888/buckets/lakehouse/
+    volumes:
+      - ./storage/s3.json:/etc/seaweedfs/s3.json:ro
+      - s3-data:/data
+    restart: unless-stopped
+
+  # Creates the lakehouse bucket once the store answers (retries until it does)
+  s3-init:
+    image: amazon/aws-cli:2.15.0
+    container_name: zomato-s3-init
+    depends_on:
+      - s3
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_DEFAULT_REGION: us-east-1
+      BUCKET: ${LAKEHOUSE_BUCKET}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 1 60); do
+          if aws --endpoint-url http://s3:9000 s3api head-bucket --bucket "$$BUCKET" 2>/dev/null \
+             || aws --endpoint-url http://s3:9000 s3 mb "s3://$$BUCKET"; then
+            echo "bucket $$BUCKET ready"; exit 0
+          fi
+          echo "waiting for the object store ($$i)"; sleep 3
+        done
+        echo "object store did not come up"; exit 1
+    restart: "no"
+
+  kafka:
+    image: apache/kafka:3.7.1
+    container_name: zomato-kafka
+    hostname: kafka
+    ports:
+      - "29092:29092"
+    environment:
+      CLUSTER_ID: zomato-kraft-cluster-0001
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 3
+      KAFKA_LOG_RETENTION_BYTES: 268435456
+      KAFKA_HEAP_OPTS: -Xmx512M -Xms512M
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  generator:
+    build:
+      context: .
+      dockerfile: docker/generator/Dockerfile
+    image: zomato/generator:1.0
+    container_name: zomato-generator
+    env_file: .env
+    environment:
+      <<: *lite-env
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Spark Structured Streaming in local mode: driver and executors share one container
+  spark-streaming:
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    image: zomato/spark:3.5.1
+    container_name: zomato-spark-streaming
+    hostname: spark-streaming
+    env_file: .env
+    environment:
+      <<: *lite-env
+      SPARK_DRIVER_MEMORY: 1800m        # 11 queries incl. live ML scoring
+      STREAM_TRIGGER: 30 seconds
+      AGG_TRIGGER: 20 seconds
+    command: bash /opt/jobs/submit.sh streaming_pipeline.py
+    volumes:
+      - ./spark/jobs:/opt/jobs:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+    ports:
+      - "4040:4040"
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: zomato-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+        airflow pools set spark_pool 1 "Serialises Spark batch jobs"
+        echo "airflow initialised"
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: zomato-airflow-webserver
+    command: webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: zomato-airflow-scheduler
+    hostname: airflow-scheduler
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    image: zomato/web:1.0
+    container_name: zomato-web
+    env_file: .env
+    environment:
+      WEB_PG_USER: grafana
+      WEB_PG_PASSWORD: grafana
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  s3-data:
+  airflow-logs:

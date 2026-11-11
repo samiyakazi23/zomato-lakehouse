@@ -1,0 +1,1443 @@
+<meta charset="utf-8">
+<title>Zomato Analytics</title>
+<script>try { document.documentElement.dataset.theme = localStorage.getItem("za-theme") || "light"; } catch (e) { document.documentElement.dataset.theme = "light"; }</script>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+/* Layout: an ops console. One sticky bar (brand, tabs, filters); each tab is a stack of
+   summary tiles -> main trend -> supporting breakdowns, read top to bottom like a briefing. */
+:root {
+  --bg: #f2f5f1; --surface: #ffffff; --surface-2: #f6f8f5; --ink: #15201a; --muted: #5d6b63; --line: #dce3db;
+  --accent: #c98300; --accent-soft: #f6e7c6; --good: #17795a; --warn: #b86200; --bad: #c0392b;
+  --c1: #c98300; --c2: #17795a; --c3: #3b6fb6; --c4: #b0476b; --c5: #6a5acd; --c6: #2f8f9d; --c7: #8a6d3b; --c8: #8a9a91;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1411; --surface: #161f1a; --surface-2: #1b2620; --ink: #e6eee9; --muted: #94a39b; --line: #26332c;
+    --accent: #f0b33a; --accent-soft: #3a2f16; --good: #3cc48e; --warn: #f0973a; --bad: #f06a5e;
+    --c1: #f0b33a; --c2: #3cc48e; --c3: #6fa1e8; --c4: #e37a9e; --c5: #9d8ff0; --c6: #4fc3d1; --c7: #c9a46a; --c8: #74857b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1411; --surface: #161f1a; --surface-2: #1b2620; --ink: #e6eee9; --muted: #94a39b; --line: #26332c;
+  --accent: #f0b33a; --accent-soft: #3a2f16; --good: #3cc48e; --warn: #f0973a; --bad: #f06a5e;
+  --c1: #f0b33a; --c2: #3cc48e; --c3: #6fa1e8; --c4: #e37a9e; --c5: #9d8ff0; --c6: #4fc3d1; --c7: #c9a46a; --c8: #74857b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 48px; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 1360px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; text-wrap: balance; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); }
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.muted { color: var(--muted); }
+button, select, input, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ------------------------------------------------ top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 6; background: var(--bg); border-bottom: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-block: 12px 0; }
+.bar-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; min-width: 0; }
+
+.brand h1 { font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
+.brand p { margin: 0; color: var(--muted); font-size: 12px; }
+.clock { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.clock .time { font-family: var(--font-mono); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: var(--surface-2); border: 1px solid var(--line); white-space: nowrap; }
+.chip.meal { background: var(--accent-soft); border-color: transparent; }
+.theme-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.theme-btn:hover { border-color: var(--accent); }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.status.live .dot, .dot.ok { background: var(--good); animation: pulse 2s infinite; }
+.status.demo .dot { background: var(--accent); }
+.dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--good) 60%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+.tabs-row { display: flex; align-items: flex-end; gap: 12px 16px; flex-wrap: wrap; justify-content: space-between; }
+.tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; max-width: 100%; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { background: none; border: 0; padding: 9px 12px 11px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.filters { display: flex; gap: 8px; align-items: center; padding-bottom: 8px; flex-wrap: wrap; }
+.filters select { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 28px 5px 10px; font-size: 13px; }
+.seg-ctl { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg-ctl button { border: 0; background: none; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--muted); }
+.seg-ctl button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink); }
+.seg-ctl button:disabled { opacity: .4; cursor: not-allowed; }
+.filters .through { font-size: 12px; color: var(--muted); }
+
+.demo-note { font-size: 13px; color: var(--muted); background: var(--surface); border: 1px dashed var(--line); border-radius: var(--radius); padding: 10px 14px; }
+.demo-note strong { color: var(--ink); }
+.demo-note code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+
+/* ------------------------------------------------ page parts */
+.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.view[hidden] { display: none !important; }
+.view-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; padding-top: 4px; }
+.view-head h2 { font-size: 22px; font-weight: 700; }
+.view-head p { margin: 0; color: var(--muted); font-size: 13px; max-width: 70ch; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.kpi { padding: 14px 16px 12px; display: grid; gap: 3px; align-content: start; box-shadow: -1px 0 0 var(--line), 0 -1px 0 var(--line); min-width: 0; }
+.kpi .value { font-family: var(--font-display); font-size: 27px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; overflow-wrap: anywhere; }
+.kpi .value small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+.kpi .sub { font-size: 12px; color: var(--muted); }
+.kpi svg { width: 100%; height: 26px; display: block; }
+.delta { font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
+.delta.up { color: var(--good); } .delta.down { color: var(--bad); } .delta.flat { color: var(--muted); }
+
+.grid { display: grid; gap: 16px; }
+.g-2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.g-21 { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.g-12 { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
+.g-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 10px; flex-wrap: wrap; }
+.panel-head h3 { font-size: 15px; font-weight: 700; }
+.panel-head span { font-size: 12px; color: var(--muted); }
+.chart-box { position: relative; height: 250px; }
+.chart-box.tall { height: 310px; }
+.chart-box.short { height: 200px; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+.t th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 0 8px 8px; white-space: nowrap; }
+.t td { padding: 7px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+.t .r { text-align: right; }
+.t .strong { font-weight: 600; }
+.t tr.hi td { background: var(--accent-soft); }
+.t .sub { font-size: 12px; color: var(--muted); }
+.scroll { overflow-x: auto; }
+.bar-in { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 4px; min-width: 60px; }
+.bar-in i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
+.pill { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+.pill.good { color: var(--good); background: color-mix(in oklab, var(--good) 14%, transparent); }
+.pill.warn { color: var(--warn); background: color-mix(in oklab, var(--warn) 14%, transparent); }
+.pill.bad { color: var(--bad); background: color-mix(in oklab, var(--bad) 13%, transparent); }
+.pill.neutral { color: var(--muted); background: var(--surface-2); }
+.pill.gold { color: var(--accent); background: var(--accent-soft); }
+
+.hbars { display: grid; gap: 8px; }
+.hbar { display: grid; grid-template-columns: minmax(80px, 140px) minmax(0, 1fr) 70px; gap: 8px; align-items: center; font-size: 12px; }
+.hbar .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar .v { text-align: right; font-family: var(--font-mono); color: var(--muted); }
+.hbar .track { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.hbar .track i { display: block; height: 100%; background: var(--accent); border-radius: 5px; }
+
+.insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.insight { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 4px; background: var(--surface-2); }
+.insight .k { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.insight .h { font-family: var(--font-display); font-size: 17px; font-weight: 700; line-height: 1.25; }
+.insight p { margin: 0; font-size: 13px; color: var(--muted); }
+
+.heat-wrap { overflow-x: auto; }
+.heat { display: grid; gap: 2px; font-size: 11px; }
+.heat .c { white-space: nowrap; padding-right: 8px; align-self: center; overflow: hidden; text-overflow: ellipsis; }
+.heat .h { height: 22px; border-radius: 3px; display: grid; place-items: center; font-family: var(--font-mono); font-size: 10px; }
+.heat .hl { text-align: center; color: var(--muted); font-family: var(--font-mono); font-size: 10px; }
+.legend { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.legend .ramp { width: 110px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--surface-2), var(--accent)); border: 1px solid var(--line); }
+
+.seg-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.seg-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 4px; }
+.seg-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.seg-card .name { font-weight: 700; }
+.seg-card .big { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+.seg-card p { margin: 0; font-size: 12px; color: var(--muted); }
+
+.city-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.city-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: grid; gap: 6px; cursor: pointer; text-align: left; }
+.city-card:hover { border-color: var(--accent); }
+.city-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.city-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.city-card .name { font-family: var(--font-display); font-weight: 700; font-size: 17px; }
+.city-card .gmv { font-family: var(--font-display); font-weight: 700; font-size: 22px; }
+.city-card .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; font-size: 12px; }
+.city-card .stats b { display: block; font-family: var(--font-mono); font-weight: 500; font-size: 13px; }
+.city-card svg { width: 100%; height: 34px; }
+
+/* live */
+.stage { display: grid; grid-template-columns: 112px minmax(0, 1fr) 64px; align-items: center; gap: 10px; font-size: 13px; }
+.stage .track { height: 22px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.stage .track i { display: block; height: 100%; background: color-mix(in oklab, var(--good) 75%, var(--surface)); border-radius: 5px; transition: width .6s ease; }
+.stage.cancel .track i { background: color-mix(in oklab, var(--bad) 70%, var(--surface)); }
+.stage .n { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+.feed { list-style: none; margin: 0; padding: 0; display: grid; max-height: 380px; overflow: hidden; position: relative; }
+.feed::after { content: ""; position: absolute; inset: auto 0 0 0; height: 48px; background: linear-gradient(transparent, var(--surface)); pointer-events: none; }
+.feed li { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: start; }
+.feed li:first-child { border-top: 0; }
+.feed li.empty { display: block; }
+.feed li.new { animation: drop .45s ease-out; }
+@keyframes drop { from { opacity: 0; transform: translateY(-8px); background: var(--accent-soft); } to { opacity: 1; transform: none; } }
+.feed .t { font-family: var(--font-mono); font-size: 11px; color: var(--muted); padding-top: 2px; }
+.feed .who { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .what { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .amt { font-family: var(--font-mono); font-size: 13px; text-align: right; }
+.tags { display: flex; gap: 4px; justify-content: flex-end; margin-top: 3px; flex-wrap: wrap; }
+.tag { font-size: 10px; font-weight: 600; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.tag.gold { color: var(--accent); }
+.stars { color: var(--accent); letter-spacing: 1px; font-size: 12px; white-space: nowrap; }
+.surge { font-size: 11px; font-weight: 600; color: var(--warn); background: color-mix(in oklab, var(--warn) 14%, transparent); border-radius: 999px; padding: 1px 7px; margin-left: 6px; white-space: nowrap; }
+.empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+.search { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-size: 13px; min-width: 0; width: 200px; max-width: 100%; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.flow .node { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); display: grid; gap: 2px; min-width: 120px; flex: 1 1 120px; }
+.flow .node b { font-size: 13px; } .flow .node span { font-size: 11px; color: var(--muted); }
+.flow .arrow { align-self: center; color: var(--muted); }
+.pipe { display: grid; grid-template-columns: 12px minmax(0, 1fr) 80px 70px; gap: 8px; align-items: center; font-size: 12px; padding: 6px 0; border-top: 1px solid var(--line); }
+.pipe:first-child { border-top: 0; }
+.pipe .rps, .pipe .age { font-family: var(--font-mono); text-align: right; }
+.pipe .age { color: var(--muted); }
+.preparing { display: flex; gap: 14px; align-items: flex-start; background: var(--accent-soft); border-radius: var(--radius); padding: 14px 16px; font-size: 14px; line-height: 1.5; }
+.preparing strong { display: block; font-family: var(--font-display); font-size: 16px; margin-bottom: 2px; }
+.preparing code { font-family: var(--font-mono); font-size: 12px; }
+.preparing a { color: var(--ink); }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in oklab, var(--accent) 35%, transparent); border-top-color: var(--accent); animation: spin 1s linear infinite; flex: none; margin-top: 3px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ask ai */
+.ask-box { display: grid; gap: 10px; }
+.ask-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ask-row textarea { flex: 1 1 320px; min-width: 0; min-height: 56px; resize: vertical; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 15px; }
+.btn { background: var(--ink); color: var(--surface); border: 0; border-radius: 8px; padding: 10px 18px; font-weight: 600; cursor: pointer; align-self: stretch; }
+.btn[disabled] { opacity: .5; cursor: wait; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.qchip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 11px; font-size: 12px; cursor: pointer; }
+.qchip:hover { border-color: var(--accent); }
+.answer { font-family: var(--font-display); font-size: 19px; font-weight: 600; line-height: 1.35; margin: 0; max-width: 75ch; }
+.answer-meta { font-size: 12px; color: var(--muted); }
+details.sql summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+details.sql pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; margin: 8px 0 0; white-space: pre; }
+.err { color: var(--bad); font-size: 14px; }
+.setup { border: 1px dashed var(--line); border-radius: 8px; padding: 12px 14px; display: grid; gap: 6px; font-size: 13px; }
+.setup code { font-family: var(--font-mono); font-size: 12px; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+.digest { white-space: pre-wrap; font-size: 14px; line-height: 1.55; margin: 0; }
+.history-list { display: grid; gap: 4px; }
+.history-list button { text-align: left; background: none; border: 0; padding: 4px 0; color: var(--muted); cursor: pointer; font-size: 13px; }
+.history-list button:hover { color: var(--ink); }
+
+footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px 18px; padding-top: 6px; }
+footer a { color: var(--ink); }
+
+@media (max-width: 1080px) { .g-3 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .g-3 > :last-child { grid-column: 1 / -1; } }
+@media (max-width: 860px) { .g-2, .g-21, .g-12, .g-3 { grid-template-columns: minmax(0, 1fr); } .g-3 > :last-child { grid-column: auto; } }
+@media (max-width: 520px) {
+  .clock .label, .meal { display: none; }
+  .tabs-row { gap: 4px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi .value { font-size: 22px; }
+  .brand p { display: none; }
+  .stage { grid-template-columns: 96px minmax(0, 1fr) 54px; }
+  .hbar { grid-template-columns: 90px minmax(0, 1fr) 58px; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <div class="bar">
+    <div class="bar-row">
+      <div class="brand">
+        <div><h1>Zomato Analytics</h1><p>Real-time big data platform · Kafka · Spark · Delta Lake · Airflow · dbt</p></div>
+      </div>
+      <div class="clock"><span class="time num" id="clock">--:--:--</span><span class="label">IST</span><span class="chip meal" id="meal">–</span></div>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="Switch to dark mode">Dark</button>
+      <span class="status demo" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></span>
+    </div>
+    <div class="tabs-row">
+      <nav class="tabs" role="tablist" aria-label="Dashboards" id="tabs"></nav>
+      <div class="filters" id="filters">
+        <label class="label" for="f-city">City</label>
+        <select id="f-city"><option value="All">All cities</option></select>
+        <div class="seg-ctl" role="group" aria-label="Period" id="f-period">
+          <button data-days="0" id="f-today" title="Today so far, compared with the same weekday last week up to the same time">Today</button><button data-days="7">7D</button><button data-days="30">30D</button><button data-days="90">90D</button><button data-days="365">1Y</button>
+        </div>
+        <span class="through" id="through"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="preparing" id="preparing" hidden>
+    <span class="spinner" aria-hidden="true"></span>
+    <div><strong>Preparing the order history…</strong>
+      <span id="preparing-text">On first start Airflow generates the past orders and builds these dashboards. This takes about 10–15 minutes; the page fills in by itself, no refresh needed. Meanwhile the <a href="#live">Live</a> tab already works, and you can watch progress in <a href="http://localhost:8080" target="_blank" rel="noopener">Airflow</a> (DAG <code>zomato_historical_backfill</code>).</span></div>
+  </div>
+  <div class="demo-note" id="demo-note" hidden>
+    <strong>Snapshot mode.</strong> These dashboards show a saved snapshot of the pipeline's output (10 million orders, through 23 Oct).
+    The Live tab is a simulation and Ask AI shows saved answers; with the full stack running everything updates in real time.
+  </div>
+
+  <!-- ============================================================ OVERVIEW -->
+  <section class="view" id="v-overview" data-tab="overview">
+    <div class="view-head"><h2>Business overview</h2><p id="ov-sub">How the marketplace performed over the selected period, compared with the period before.</p></div>
+    <div class="kpis" id="ov-kpis"></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Net GMV per day, with a 14-day forecast</h3><span>trend × weekday pattern, fitted on the last 8 weeks</span></div>
+        <div class="chart-box tall"><canvas id="ov-trend"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>GMV by city</h3><span id="ov-city-sub">selected period</span></div><div class="hbars" id="ov-cities"></div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>What the data says</h3><span>generated from the numbers on this page</span></div><div class="insights" id="ov-insights"></div></div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Orders by day of week</h3><span>average per day</span></div><div class="chart-box short"><canvas id="ov-dow"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Cuisine share of GMV</h3><span>last 90 days</span></div><div class="hbars" id="ov-cuisines"></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ASK AI -->
+  <section class="view" id="v-ask" data-tab="ask" hidden>
+    <div class="view-head"><h2>Ask your data</h2><p>Type a question in plain English. A language model writes the SQL, it runs read-only against the warehouse, and you get the answer, the table and a chart.</p></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Question</h3><span id="ai-status" class="chip">checking AI…</span></div>
+      <form class="ask-box" id="ask-form">
+        <div class="ask-row"><textarea id="ask-q" rows="2" placeholder="e.g. Which city had the slowest deliveries last week?" aria-label="Your question"></textarea><button class="btn" id="ask-btn" type="submit">Ask</button></div>
+        <div class="chips" id="ask-chips"></div>
+      </form>
+      <div class="setup" id="ai-setup" hidden></div>
+    </div>
+    <div class="panel" id="ask-result" hidden>
+      <p class="answer" id="ask-answer"></p>
+      <span class="answer-meta" id="ask-meta"></span>
+      <div class="chart-box" id="ask-chart-box"><canvas id="ask-chart"></canvas></div>
+      <div class="scroll"><table class="t" id="ask-table"></table></div>
+      <details class="sql"><summary>Show the SQL</summary><pre id="ask-sql"></pre></details>
+    </div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Review digest</h3><span id="dg-src">latest reviews from Kafka</span></div>
+        <pre class="digest" id="dg-summary"></pre><div class="hbars" id="dg-themes"></div></div>
+      <div class="panel"><div class="panel-head"><h3>Asked this session</h3></div><div class="history-list" id="ask-history"><span class="muted">Your questions will appear here.</span></div>
+        <p class="note">Safety: only single read-only SELECT queries run, on a login that can't change data, with a 5-second limit and at most 200 rows.</p></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ LIVE -->
+  <section class="view" id="v-live" data-tab="live" hidden>
+    <div class="view-head"><h2>Live operations</h2><p>Spark Structured Streaming, 1-minute windows, refreshed every 5 seconds. Filters don't apply here: this is the whole country right now.</p></div>
+    <div class="kpis" id="lv-kpis"></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Orders per minute, by city</h3><span>last 30 minutes</span></div><div class="chart-box tall"><canvas id="lv-orders"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>City board</h3><span>last 15 minutes</span></div>
+        <div class="scroll"><table class="t"><thead><tr><th>City</th><th class="r">Orders</th><th>GMV</th><th class="r">Deliv.</th><th class="r">Cancel</th></tr></thead><tbody id="lv-board"></tbody></table></div></div>
+    </div>
+    <div class="grid g-3">
+      <div class="panel"><div class="panel-head"><h3>Order lifecycle</h3><span>events, last 15 min</span></div><div class="hbars" id="lv-funnel"></div><p class="note" id="lv-funnel-foot"></p></div>
+      <div class="panel"><div class="panel-head"><h3>Incoming orders</h3><span id="lv-feed-src">Kafka · zomato.orders</span></div><ul class="feed" id="lv-feed"><li class="empty">Waiting for orders…</li></ul></div>
+      <div class="panel"><div class="panel-head"><h3>Fresh reviews</h3><span>Kafka · zomato.reviews</span></div><ul class="feed" id="lv-reviews"><li class="empty">Waiting for reviews…</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ MACHINE LEARNING -->
+  <section class="view" id="v-ml" data-tab="ml" hidden>
+    <div class="view-head"><h2>Machine learning</h2><p>Two Spark MLlib models, retrained every night by Airflow on the lakehouse: a classifier that predicts late deliveries and scores every live order, and K-means clusters of customer behaviour.</p></div>
+    <div class="kpis" id="ml-kpis"></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Late-delivery model: algorithms compared</h3><span id="ml-models-sub">held-out test orders</span></div>
+        <div class="scroll"><table class="t" id="ml-models"></table></div><p class="note" id="ml-models-note"></p></div>
+      <div class="panel"><div class="panel-head"><h3>ROC curve</h3><span>closer to the top-left is better</span></div><div class="chart-box"><canvas id="ml-roc"></canvas></div></div>
+    </div>
+    <div class="grid g-12">
+      <div class="panel"><div class="panel-head"><h3>What drives lateness</h3><span>feature importance</span></div><div class="hbars" id="ml-imp"></div></div>
+      <div class="panel"><div class="panel-head"><h3>Live orders most likely to be late</h3><span>scored in Spark Streaming, last 15 min</span></div>
+        <div class="scroll"><table class="t"><thead><tr><th>Order</th><th>City</th><th>Restaurant</th><th class="r">Promised</th><th class="r">Late risk</th></tr></thead><tbody id="ml-risk"></tbody></table></div>
+        <p class="note" id="ml-risk-note"></p></div>
+    </div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Predicted vs actual late rate</h3><span>by city, test orders</span></div><div class="chart-box"><canvas id="ml-city"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Confusion matrix</h3><span id="ml-cm-sub">selected model</span></div><div id="ml-cm"></div><p class="note" id="ml-cm-note"></p></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Customer clusters (K-means)</h3><span id="ml-cl-sub">groups found by the algorithm</span></div><div class="seg-cards" id="ml-clusters"></div></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Clusters compared with rule-based RFM segments</h3><span>share of each cluster</span></div><div class="heat-wrap"><div class="heat" id="ml-cross"></div></div></div>
+      <div class="panel"><div class="panel-head"><h3>Choosing k</h3><span>silhouette score (higher = better separated)</span></div><div class="chart-box"><canvas id="ml-k"></canvas></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ORDERS -->
+  <section class="view" id="v-orders" data-tab="orders" hidden>
+    <div class="view-head"><h2>Orders</h2><p>Volume, timing, baskets, payments, coupons, delivery speed and why orders get cancelled.</p></div>
+    <div class="kpis" id="or-kpis"></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Orders per day</h3><span>delivered and cancelled</span></div><div class="chart-box tall"><canvas id="or-daily"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Why orders are cancelled</h3><span>last 90 days</span></div><div class="hbars" id="or-cancel"></div><p class="note" id="or-cancel-note"></p></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>When people order</h3><div class="legend"><span>quiet</span><span class="ramp"></span><span>busiest</span></div></div>
+      <div class="heat-wrap"><div class="heat" id="or-heat" style="grid-template-columns: 44px repeat(24, minmax(22px, 1fr)); min-width: 620px"></div></div>
+      <p class="note">Orders by hour of day (IST) and weekday, last 90 days. Lunch and dinner peaks are the two bright bands.</p></div>
+    <div class="grid g-3">
+      <div class="panel"><div class="panel-head"><h3>Items per order</h3><span>last 90 days</span></div><div class="chart-box short"><canvas id="or-items"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Order value</h3><span>orders per ₹100 band</span></div><div class="chart-box short"><canvas id="or-value"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>How people pay</h3><span>last 90 days</span></div><div class="chart-box short"><canvas id="or-pay"></canvas></div></div>
+    </div>
+    <div class="grid g-12">
+      <div class="panel"><div class="panel-head"><h3>Delivery time</h3><span id="or-del-sub">delivered orders, minutes</span></div><div class="chart-box"><canvas id="or-delivery"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Coupon performance</h3><span>last 90 days, all cities</span></div>
+        <div class="scroll"><table class="t"><thead><tr><th>Coupon</th><th class="r">Orders</th><th class="r">GMV</th><th class="r">Discount</th><th class="r">Per order</th><th class="r">Cost %</th><th class="r">Gold share</th></tr></thead><tbody id="or-coupons"></tbody></table></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ CUSTOMERS -->
+  <section class="view" id="v-customers" data-tab="customers" hidden>
+    <div class="view-head"><h2>Customers</h2><p>Who orders, how often, whether they come back, and how Gold members differ. Cohorts and monthly trends are national.</p></div>
+    <div class="kpis" id="cu-kpis"></div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Active and new customers</h3><span>per month</span></div><div class="chart-box"><canvas id="cu-monthly"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>How often customers order</h3><span>lifetime orders per customer</span></div><div class="chart-box"><canvas id="cu-freq"></canvas></div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Cohort retention</h3><span>share of each month's new customers still ordering N months later</span></div>
+      <div class="heat-wrap"><div class="heat" id="cu-cohorts"></div></div></div>
+    <div class="panel"><div class="panel-head"><h3>Customer segments (RFM)</h3><span>recency, frequency and spend, with the action a CRM team would take</span></div><div class="seg-cards" id="cu-segments"></div></div>
+    <div class="grid g-12">
+      <div class="panel"><div class="panel-head"><h3>Gold members vs everyone else</h3><span>per customer</span></div>
+        <div class="scroll"><table class="t" id="cu-gold"></table></div><p class="note" id="cu-gold-note"></p></div>
+      <div class="panel"><div class="panel-head"><h3>Top customers by spend</h3><span>lifetime spend</span></div>
+        <div class="scroll"><table class="t"><thead><tr><th>Customer</th><th>City</th><th class="r">Orders</th><th class="r">Spend</th><th>Segment</th><th class="r">Last order</th></tr></thead><tbody id="cu-top"></tbody></table></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ RESTAURANTS -->
+  <section class="view" id="v-restaurants" data-tab="restaurants" hidden>
+    <div class="view-head"><h2>Restaurants</h2><p>Leaderboard, cuisines, price bands and which partners need attention. Last 90 days.</p></div>
+    <div class="kpis" id="re-kpis"></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Leaderboard</h3>
+        <div class="toolbar"><input class="search" id="re-search" type="search" placeholder="Search restaurant or cuisine" aria-label="Search restaurants">
+          <select id="re-sort" aria-label="Sort by"><option value="gmv">Sort: GMV</option><option value="orders">Sort: orders</option><option value="rating">Sort: rating</option><option value="cancel_rate">Sort: cancel rate</option><option value="delivery">Sort: delivery time</option></select></div></div>
+      <div class="scroll"><table class="t"><thead><tr><th>#</th><th>Restaurant</th><th>City</th><th class="r">Orders</th><th>GMV</th><th class="r">Rating</th><th class="r">Cancel</th><th class="r">Deliv.</th><th class="r">For two</th><th>Health</th></tr></thead><tbody id="re-table"></tbody></table></div>
+    </div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Cuisine performance</h3><span>GMV and average rating</span></div><div class="chart-box tall"><canvas id="re-cuisine"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Partner health</h3><span>by segment</span></div><div class="chart-box short"><canvas id="re-health"></canvas></div><p class="note">Star: rating ≥ 4.2 and cancellations under 4%. At risk: rating under 3.0 or cancellations over 10%.</p></div>
+    </div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Price band</h3><span>by average cost for two</span></div><div class="scroll"><table class="t" id="re-bands"></table></div></div>
+      <div class="panel"><div class="panel-head"><h3>Popularity vs rating</h3><span>top restaurants per city</span></div><div class="chart-box"><canvas id="re-scatter"></canvas></div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Price and rating changes</h3><span>history kept by a dbt SCD2 snapshot of restaurant listings</span></div>
+      <div class="kpis" id="re-change-kpis"></div>
+      <div class="scroll"><table class="t"><thead><tr><th>Restaurant</th><th>City</th><th>Change</th><th class="r">Cost for two</th><th class="r">Rating</th><th class="r">When</th></tr></thead><tbody id="re-changes"></tbody></table></div></div>
+  </section>
+
+  <!-- ============================================================ REVIEWS -->
+  <section class="view" id="v-reviews" data-tab="reviews" hidden>
+    <div class="view-head"><h2>Reviews</h2><p>How customers rate their orders and what moves the score. Distributions cover the last 90 days.</p></div>
+    <div class="kpis" id="rv-kpis"></div>
+    <div class="grid g-12">
+      <div class="panel"><div class="panel-head"><h3>Rating distribution</h3><span>share of reviews</span></div><div class="chart-box"><canvas id="rv-dist"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Average rating per day</h3><span>selected period</span></div><div class="chart-box"><canvas id="rv-trend"></canvas></div></div>
+    </div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Late food, low stars</h3><span>rating mix by how late the delivery was</span></div><div class="chart-box"><canvas id="rv-late"></canvas></div><p class="note" id="rv-late-note"></p></div>
+      <div class="panel"><div class="panel-head"><h3>Rating by cuisine</h3><span>average stars</span></div><div class="hbars" id="rv-cuisine"></div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Latest reviews</h3><span id="rv-feed-src">Kafka · zomato.reviews</span></div><ul class="feed" id="rv-feed" style="max-height:420px"></ul></div>
+  </section>
+
+  <!-- ============================================================ RIDERS -->
+  <section class="view" id="v-riders" data-tab="riders" hidden>
+    <div class="view-head"><h2>Delivery partners</h2><p>Fleet activity, workload and speed over the last 30 days of data.</p></div>
+    <div class="kpis" id="ri-kpis"></div>
+    <div class="grid g-21">
+      <div class="panel"><div class="panel-head"><h3>Active riders and deliveries</h3><span>per day</span></div><div class="chart-box"><canvas id="ri-daily"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Deliveries per rider per day</h3><span>rider-days</span></div><div class="chart-box"><canvas id="ri-load"></canvas></div></div>
+    </div>
+    <div class="grid g-12">
+      <div class="panel"><div class="panel-head"><h3>By vehicle</h3><span>last 30 days</span></div><div class="scroll"><table class="t" id="ri-vehicle"></table></div></div>
+      <div class="panel"><div class="panel-head"><h3>Top riders</h3><span>most deliveries, last 30 days</span></div>
+        <div class="scroll"><table class="t"><thead><tr><th>#</th><th>Rider</th><th>City</th><th>Vehicle</th><th class="r">Deliveries</th><th class="r">Avg min</th><th class="r">km</th><th class="r">Rating</th></tr></thead><tbody id="ri-top"></tbody></table></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ CITIES -->
+  <section class="view" id="v-cities" data-tab="cities" hidden>
+    <div class="view-head"><h2>Cities</h2><p>Every market side by side. Click a city to filter the whole site to it.</p></div>
+    <div class="city-cards" id="ci-cards"></div>
+    <div class="panel"><div class="panel-head"><h3>City scorecard</h3><span>selected period, change vs the period before</span></div>
+      <div class="scroll"><table class="t"><thead><tr><th>City</th><th class="r">Orders</th><th class="r">GMV</th><th class="r">Growth</th><th class="r">AOV</th><th class="r">Delivery</th><th class="r">Late</th><th class="r">Rating</th><th class="r">Cancel</th><th class="r">Gold</th></tr></thead><tbody id="ci-table"></tbody></table></div></div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Daily demand curve</h3><span>share of a city's orders by hour (IST)</span></div><div class="chart-box tall"><canvas id="ci-hours"></canvas></div></div>
+      <div class="panel"><div class="panel-head"><h3>Top cuisine in each city</h3><span>last 90 days</span></div><div class="scroll"><table class="t" id="ci-cuisine"></table></div></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ PIPELINE -->
+  <section class="view" id="v-pipeline" data-tab="pipeline" hidden>
+    <div class="view-head"><h2>Pipeline and data quality</h2><p>Where these numbers come from, how fresh they are, and what was rejected on the way in.</p></div>
+    <div class="flow" id="pl-flow"></div>
+    <div class="kpis" id="pl-kpis"></div>
+    <div class="grid g-2">
+      <div class="panel"><div class="panel-head"><h3>Streaming queries</h3><span id="pl-pipe-sum">live</span></div><div id="pl-pipes"></div></div>
+      <div class="panel"><div class="panel-head"><h3>Rejected events</h3><span>quarantined by the streaming data-quality rules</span></div><div class="hbars" id="pl-quality"></div>
+        <div class="chart-box short"><canvas id="pl-quality-trend"></canvas></div></div>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Lakehouse tables</h3><span>Delta Lake on S3 (SeaweedFS)</span></div>
+      <div class="scroll"><table class="t"><thead><tr><th>Layer</th><th>Table</th><th>Written by</th><th>What it holds</th></tr></thead><tbody id="pl-tables"></tbody></table></div></div>
+  </section>
+
+  <footer>
+    <span id="foot-mode">Zomato Analytics</span>
+    <span id="foot-links" style="display:contents">
+    <a href="http://localhost:3000" target="_blank" rel="noopener">Grafana :3000</a>
+    <a href="http://localhost:8080" target="_blank" rel="noopener">Airflow :8080</a>
+    <a href="http://localhost:9090" target="_blank" rel="noopener">Spark :9090</a>
+    <a href="http://localhost:8085" target="_blank" rel="noopener">Kafka UI :8085</a>
+    <a href="http://localhost:8888/buckets/lakehouse/" target="_blank" rel="noopener">Lake files :8888</a>
+    </span>
+  </footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+// =============================================================== helpers
+const $ = id => document.getElementById(id);
+const nf = new Intl.NumberFormat("en-IN");
+const fmtN = v => v == null || isNaN(v) ? "–" : nf.format(Math.round(v));
+function fmtINR(v, short = true) {
+  if (v == null || isNaN(v)) return "–";
+  const a = Math.abs(v), s = v < 0 ? "−" : "";
+  if (short && a >= 1e9) return s + "₹" + nf.format(Math.round(a / 1e7)) + " Cr";
+  if (short && a >= 1e7) return s + "₹" + (a / 1e7).toFixed(2) + " Cr";
+  if (short && a >= 1e5) return s + "₹" + (a / 1e5).toFixed(2) + " L";
+  return s + "₹" + nf.format(Math.round(a));
+}
+function compact(v) {
+  if (v == null || isNaN(v)) return "–";
+  if (v >= 1e7) return (v / 1e7).toFixed(2) + " Cr";
+  if (v >= 1e5) return (v / 1e5).toFixed(2) + " L";
+  return nf.format(Math.round(v));
+}
+const pct = (v, d = 1) => v == null || isNaN(v) ? "–" : (v * 100).toFixed(d) + "%";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const sum = (a, f) => a.reduce((s, x) => s + (f ? (+f(x) || 0) : (+x || 0)), 0);
+const groupBy = (a, k) => a.reduce((m, x) => { const key = typeof k === "function" ? k(x) : x[k]; (m[key] ||= []).push(x); return m; }, {});
+// Retention at month k: plain average across monthly cohorts, skipping the first (it holds the pre-existing base)
+function retentionAt(cohorts, k) {
+  const first = [...new Set((cohorts || []).map(c => c.cohort))].sort()[0];
+  const rs = (cohorts || []).filter(c => c.k === k && c.cohort !== first && c.size > 0).map(c => c.customers / c.size);
+  return rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null;
+}
+const T = t => !t || !t.cols ? [] : t.rows.map(r => Object.fromEntries(t.cols.map((c, i) => [c, r[i]])));
+const IST_OFFSET = 330;
+const toIST = d => new Date(new Date(d).getTime() + (IST_OFFSET + new Date().getTimezoneOffset()) * 60000);
+const istNow = () => toIST(Date.now());
+const isoDay = d => d.toISOString().slice(0, 10);
+const addDays = (iso, n) => isoDay(new Date(Date.parse(iso + "T00:00:00Z") + n * 86400000));
+const dayLabel = iso => new Date(iso + "T00:00:00Z").toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" }) + (S.H && iso === S.H.today ? " (today)" : "");
+function hexA(hex, a) { const h = hex.replace("#", ""); const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+const palette = () => ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6", "--c7", "--c8"].map(css);
+function stars(r) { const n = Math.round(r || 0); return "★".repeat(n) + "☆".repeat(5 - n); }
+function delta(cur, prev, invert = false, asPts = false) {
+  if (cur == null || prev == null || !isFinite(cur) || !isFinite(prev) || prev === 0) return '<span class="delta flat">no prior data</span>';
+  const d = asPts ? (cur - prev) * 100 : (cur / prev - 1) * 100;
+  const good = invert ? d < 0 : d > 0, flat = Math.abs(d) < 0.05;
+  const txt = asPts ? `${d > 0 ? "+" : ""}${d.toFixed(1)} pts` : `${d > 0 ? "+" : ""}${d.toFixed(1)}%`;
+  return `<span class="delta ${flat ? "flat" : good ? "up" : "down"}">${d > 0 ? "▲" : d < 0 ? "▼" : "•"} ${txt}</span>`;
+}
+function kpiHTML(items) {
+  return items.map(k => `<div class="kpi"><span class="label">${k.label}</span><span class="value num">${k.value}</span>${k.delta ? `<span>${k.delta}</span>` : ""}${k.sub ? `<span class="sub">${k.sub}</span>` : ""}${k.spark ? `<svg viewBox="0 0 100 26" preserveAspectRatio="none">${k.spark}</svg>` : ""}</div>`).join("");
+}
+function sparkPath(values, color, h = 26) {
+  if (!values.length) return "";
+  const max = Math.max(...values), min = Math.min(...values), span = max - min || 1;
+  const pts = values.map((v, i) => [i / (values.length - 1 || 1) * 100, h - 2 - (v - min) / span * (h - 6)]);
+  const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(2) + " " + p[1].toFixed(2)).join(" ");
+  const last = pts[pts.length - 1];
+  return `<path d="${d} L100 ${h} L0 ${h} Z" fill="${color}" fill-opacity=".14"/><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/><circle cx="${last[0]}" cy="${last[1]}" r="2" fill="${color}"/>`;
+}
+function hbars(el, items, { fmt = fmtN, color = "var(--accent)", max } = {}) {
+  const m = max ?? Math.max(...items.map(i => i.value), 1);
+  $(el).innerHTML = items.length ? items.map(i => `<div class="hbar"><span class="name" title="${esc(i.name)}">${esc(i.name)}</span><span class="track"><i style="width:${Math.max(0, i.value / m * 100).toFixed(1)}%;background:${i.color || color}"></i></span><span class="v">${fmt(i.value)}</span></div>`).join("") : '<div class="empty">No data for this selection.</div>';
+}
+
+// =============================================================== charts
+const charts = {};
+function chartDefaults() {
+  if (!window.Chart) return;
+  Chart.defaults.font.family = css("--font-body"); Chart.defaults.font.size = 11;
+  Chart.defaults.color = css("--muted"); Chart.defaults.borderColor = css("--line");
+  Chart.defaults.animation.duration = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 350;
+  Chart.defaults.plugins.legend.labels.boxWidth = 10; Chart.defaults.plugins.legend.labels.boxHeight = 10;
+  Chart.defaults.plugins.legend.labels.usePointStyle = true;
+  Chart.defaults.maintainAspectRatio = false;
+}
+function chart(id, config) {
+  if (!window.Chart || !$(id)) return;
+  if (charts[id]) { charts[id].destroy(); }
+  charts[id] = new Chart($(id), config);
+}
+const gridY = (fmt) => ({ grid: { color: css("--line") }, ticks: { callback: v => fmt ? fmt(v) : compact(v) }, beginAtZero: true });
+const noGridX = (extra = {}) => ({ grid: { display: false }, ...extra });
+
+// =============================================================== state
+const TABS = [["overview", "Overview"], ["ask", "Ask AI"], ["live", "Live"], ["ml", "ML Models"], ["orders", "Orders"], ["customers", "Customers"], ["restaurants", "Restaurants"],
+              ["reviews", "Reviews"], ["riders", "Riders"], ["cities", "Cities"], ["pipeline", "Pipeline & quality"]];
+const S = { mode: null, tab: "overview", city: "All", days: 30, H: null, live: null, feed: null, ML: null };
+try { const saved = JSON.parse(localStorage.getItem("pulse-filters") || "{}"); if (saved.days) S.days = saved.days; if (saved.city) S.city = saved.city; } catch {}
+const saveFilters = () => { try { localStorage.setItem("pulse-filters", JSON.stringify({ days: S.days, city: S.city })); } catch {} };
+
+function prep(raw) {
+  const H = {}; for (const [k, v] of Object.entries(raw)) H[k] = v && v.cols ? T(v) : v;
+  H.daily = (H.daily || []).map(r => ({ ...r }));
+  const dates = [...new Set(H.daily.map(r => r.d))].sort();
+  const today = isoDay(istNow());
+  // The 7D/30D/90D/1Y periods use complete days only (they end yesterday). Today's partial data is kept
+  // separately for the "Today" view, which compares it with the same weekday last week up to the same time.
+  const hasToday = dates.length > 1 && dates[dates.length - 1] >= today;
+  H.today = hasToday ? dates[dates.length - 1] : null;
+  H.lastFull = dates.length ? (hasToday ? dates[dates.length - 2] : dates[dates.length - 1]) : null;
+  H.lastDay = H.lastFull;
+  H.firstDay = dates[0];
+  H.cities = [...new Set(H.daily.map(r => r.city))].sort((a, b) => sum(H.daily.filter(r => r.city === b), r => r.gmv) - sum(H.daily.filter(r => r.city === a), r => r.gmv));
+  H.refresh = (H.refresh || [])[0] || null;
+  return H;
+}
+const inCity = r => S.city === "All" || r.city === S.city;
+const isToday = () => S.days === 0 && !!(S.H && S.H.today);
+function period(offset = 0) {   // [start, end] of the selected window, offset = how many windows back
+  if (isToday()) { const d = addDays(S.H.today, -7 * offset); return [d, d]; }   // today vs same weekday last week
+  const days = S.days || 7, end = addDays(S.H.lastDay, -days * offset), start = addDays(end, -(days - 1));
+  return [start, end];
+}
+const periodText = () => isToday() ? "today so far" : `the last ${S.days || 7} days`;
+// Share of a normal day's orders placed by this time of day (IST), from the hourly demand profile of today's weekday.
+function dayFraction() {
+  const now = istNow(), h = now.getHours() + now.getMinutes() / 60, dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][now.getDay()];
+  const rows = (S.H.hourly || []).filter(r => r.dow === dow && inCity(r));
+  if (!rows.length) return Math.min(1, h / 24);
+  const byH = Array(24).fill(0); for (const r of rows) byH[r.hour] += r.orders;
+  const tot = sum(byH) || 1, full = Math.floor(h);
+  return Math.min(1, (sum(byH.slice(0, full)) + (byH[full] || 0) * (h - full)) / tot);
+}
+const ADDITIVE = ["orders", "delivered", "cancelled", "gmv", "discount", "ratings_count", "customers"];
+function dailyIn(offset = 0, cityFilter = true) {
+  const [a, b] = period(offset);
+  const rows = S.H.daily.filter(r => r.d >= a && r.d <= b && (!cityFilter || inCity(r)));
+  if (offset === 0 || !isToday()) return rows;
+  // Today view: last week's same weekday counts only up to the same time of day, so the comparison is fair
+  const f = dayFraction();
+  return rows.map(r => r.d !== b ? r : { ...r, _partial: true, ...Object.fromEntries(ADDITIVE.filter(k => r[k] != null).map(k => [k, r[k] * f])) });
+}
+function summarize(rows) {
+  const orders = sum(rows, r => r.orders), delivered = sum(rows, r => r.delivered), cancelled = sum(rows, r => r.cancelled);
+  const w = (f, wf) => { const den = sum(rows.filter(r => r[f] != null), wf); return den ? sum(rows.filter(r => r[f] != null), r => r[f] * wf(r)) / den : null; };
+  return {
+    orders, delivered, cancelled, gmv: sum(rows, r => r.gmv), amount: sum(rows, r => r.aov * r.orders),
+    aov: orders ? sum(rows, r => r.aov * r.orders) / orders : null,
+    cancel: (delivered + cancelled) ? cancelled / (delivered + cancelled) : null,
+    delivery: w("delivery", r => r.delivered), rating: w("rating", r => r.ratings_count), reviews: sum(rows, r => r.ratings_count),
+    late: w("late_rate", r => r.delivered), coupon: w("coupon_share", r => r.orders), cod: w("cod_share", r => r.orders),
+    items: w("avg_items", r => r.orders), gold: w("gold_share", r => r.orders), discount: sum(rows, r => r.discount),
+    customers: (() => { const full = rows.filter(r => r.d !== S.H.today && !r._partial), use = full.length ? full : rows;
+      return use.length ? sum(use, r => r.customers) / new Set(use.map(r => r.d)).size : null; })(),
+    goldAov: w("gold_aov", r => r.orders * (r.gold_share || 0)), nonGoldAov: w("non_gold_aov", r => r.orders * (1 - (r.gold_share || 0))),
+    reviewRate: w("review_rate", r => r.delivered),
+  };
+}
+function byDay(rows) {
+  const g = groupBy(rows, "d"); return Object.keys(g).sort().map(d => ({ d, ...summarize(g[d]) }));
+}
+
+// =============================================================== forecast (trend × weekday seasonality)
+function forecast(series, horizon = 14) {
+  const hist = series.slice(-56); if (hist.length < 21) return [];
+  const mean = sum(hist, p => p.y) / hist.length;
+  const dowF = Array.from({ length: 7 }, (_, k) => { const v = hist.filter(p => new Date(p.d + "T00:00:00Z").getUTCDay() === k); return v.length ? (sum(v, p => p.y) / v.length) / mean : 1; });
+  const xs = hist.map((_, i) => i), ys = hist.map(p => p.y / dowF[new Date(p.d + "T00:00:00Z").getUTCDay()]);
+  const mx = sum(xs) / xs.length, my = sum(ys) / ys.length;
+  const b = sum(xs.map((x, i) => (x - mx) * (ys[i] - my))) / sum(xs.map(x => (x - mx) ** 2)), a = my - b * mx;
+  const resid = hist.map((p, i) => p.y - (a + b * i) * dowF[new Date(p.d + "T00:00:00Z").getUTCDay()]);
+  const sd = Math.sqrt(sum(resid.map(r => r * r)) / resid.length);
+  const last = hist[hist.length - 1].d;
+  return Array.from({ length: horizon }, (_, h) => { const d = addDays(last, h + 1), y = (a + b * (hist.length + h)) * dowF[new Date(d + "T00:00:00Z").getUTCDay()]; return { d, y, lo: y - 1.64 * sd, hi: y + 1.64 * sd }; });
+}
+
+// =============================================================== OVERVIEW
+function renderOverview() {
+  const H = S.H, cur = summarize(dailyIn(0)), prev = summarize(dailyIn(1));
+  const nowT = istNow().toTimeString().slice(0, 5), who = S.city === "All" ? "All cities" : S.city;
+  $("ov-sub").textContent = isToday()
+    ? `${who} · Today, ${dayLabel(H.today).replace(" (today)", "")}, up to ${nowT} IST, compared with last ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][new Date(H.today + "T00:00:00Z").getUTCDay()]} (${dayLabel(period(1)[0])}) up to the same time.`
+    : `${who} · ${dayLabel(period()[0])} – ${dayLabel(period()[1])}, compared with the ${S.days || 7} days before.`;
+  const series = byDay(dailyIn(0));
+  $("ov-kpis").innerHTML = kpiHTML([
+    { label: "Orders", value: compact(cur.orders), delta: delta(cur.orders, prev.orders), spark: sparkPath(series.map(s => s.orders), css("--accent")) },
+    { label: "Net GMV", value: fmtINR(cur.gmv), delta: delta(cur.gmv, prev.gmv), spark: sparkPath(series.map(s => s.gmv), css("--good")) },
+    { label: "Avg order value", value: fmtINR(cur.aov, false), delta: delta(cur.aov, prev.aov) },
+    { label: isToday() ? "Customers today" : "Customers per day", value: compact(cur.customers), delta: delta(cur.customers, prev.customers) },
+    { label: "Avg delivery", value: cur.delivery ? `${cur.delivery.toFixed(1)}<small>min</small>` : "–", delta: delta(cur.delivery, prev.delivery, true) },
+    { label: "Late deliveries", value: pct(cur.late), delta: delta(cur.late, prev.late, true, true) },
+    { label: "Avg rating", value: cur.rating ? `${cur.rating.toFixed(2)}<small>★</small>` : "–", delta: delta(cur.rating, prev.rating) },
+    { label: "Cancellations", value: pct(cur.cancel), delta: delta(cur.cancel, prev.cancel, true, true) },
+  ]);
+
+  // trend + forecast (forecast always from the full complete history of the selection)
+  const all = byDay(H.daily.filter(r => r.d <= H.lastFull && inCity(r))).map(p => ({ d: p.d, y: p.gmv }));
+  const todaySoFar = H.today ? sum(H.daily.filter(r => r.d === H.today && inCity(r)), r => r.gmv) : null;
+  const fc = forecast(all);
+  const shown = all.filter(p => p.d >= (isToday() ? addDays(H.lastFull, -13) : period()[0]));
+  const labels = [...shown.map(p => p.d), ...fc.map(p => p.d)];
+  const pad = n => Array(n).fill(null);
+  const acc = css("--accent"), ink = css("--ink");
+  const avg7 = shown.map((p, i) => { const idx = all.findIndex(q => q.d === p.d); const w = all.slice(Math.max(0, idx - 6), idx + 1); return sum(w, q => q.y) / w.length; });
+  chart("ov-trend", { type: "line", data: { labels, datasets: [
+      { label: "Net GMV", data: [...shown.map(p => p.y), ...pad(fc.length)], borderColor: hexA(acc, .7), backgroundColor: hexA(acc, .12), fill: true, pointRadius: 0, borderWidth: 1.5, tension: .25 },
+      { label: "7-day average", data: [...avg7, ...pad(fc.length)], borderColor: ink, pointRadius: 0, borderWidth: 2, tension: .3 },
+      { label: "Forecast", data: [...pad(shown.length - 1), shown.length ? shown[shown.length - 1].y : null, ...fc.map(p => p.y)], borderColor: ink, borderDash: [5, 4], pointRadius: 0, borderWidth: 2 },
+      { label: "Forecast range", data: [...pad(shown.length), ...fc.map(p => p.hi)], borderColor: "transparent", backgroundColor: hexA(ink, .08), fill: "+1", pointRadius: 0 },
+      { label: "_lo", data: [...pad(shown.length), ...fc.map(p => p.lo)], borderColor: "transparent", pointRadius: 0, fill: false },
+      ...(H.today && fc.length && fc[0].d === H.today ? [{ label: "Today so far", data: [...pad(shown.length), todaySoFar, ...pad(fc.length - 1)], borderColor: acc, backgroundColor: acc, pointRadius: 5, pointHoverRadius: 6, showLine: false }] : []),
+    ] },
+    options: { interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom", labels: { filter: i => !i.text.startsWith("_") && i.text !== "Forecast range" } },
+        tooltip: { filter: i => !i.dataset.label.startsWith("_") && i.dataset.label !== "Forecast range", callbacks: { title: c => dayLabel(c[0].label), label: c => `${c.dataset.label}: ${fmtINR(c.parsed.y)}` } } },
+      scales: { x: noGridX({ ticks: { maxTicksLimit: 8, callback(v) { return dayLabel(this.getLabelForValue(v)); } } }), y: { ...gridY(v => fmtINR(v)), beginAtZero: false } } } });
+
+  // GMV by city
+  const cityRows = groupBy(dailyIn(0, false), "city"), prevRows = groupBy(dailyIn(1, false), "city");
+  const items = Object.entries(cityRows).map(([c, rs]) => ({ name: c, value: sum(rs, r => r.gmv), prev: sum(prevRows[c] || [], r => r.gmv) })).sort((a, b) => b.value - a.value);
+  hbars("ov-cities", items.map(i => ({ ...i, color: S.city === "All" || S.city === i.name ? "var(--accent)" : "color-mix(in oklab, var(--accent) 35%, var(--surface-2))" })), { fmt: v => fmtINR(v) });
+
+  // day of week
+  const dow = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const byD = groupBy(byDay(dailyIn(0)).filter(p => p.d !== H.today), p => new Date(p.d + "T00:00:00Z").getUTCDay());
+  const dowVals = [1, 2, 3, 4, 5, 6, 0].map(k => byD[k] ? sum(byD[k], p => p.orders) / byD[k].length : 0);
+  chart("ov-dow", { type: "bar", data: { labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], datasets: [{ data: dowVals, backgroundColor: [1, 2, 3, 4, 5, 6, 0].map(k => k === 0 || k === 6 ? acc : hexA(acc, .45)), borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${fmtN(c.parsed.y)} orders/day` } } }, scales: { x: noGridX(), y: gridY() } } });
+
+  // cuisines
+  const cz = groupBy((H.cuisines || []).filter(inCity), "cuisine");
+  const cItems = Object.entries(cz).map(([c, rs]) => ({ name: c, value: sum(rs, r => r.gmv) })).sort((a, b) => b.value - a.value);
+  const cTot = sum(cItems, i => i.value) || 1;
+  hbars("ov-cuisines", cItems.map(i => ({ name: i.name, value: i.value / cTot * 100 })), { fmt: v => v.toFixed(1) + "%" });
+
+  // insights
+  const ins = [];
+  const growth = items.filter(i => i.prev > 0).map(i => ({ ...i, g: i.value / i.prev - 1 })).sort((a, b) => b.g - a.g);
+  if (growth.length) ins.push({ k: "Growth", h: `${growth[0].name} grew fastest: ${delta(growth[0].value, growth[0].prev).replace(/<[^>]+>/g, "")}`, p: `GMV ${fmtINR(growth[0].value)} ${isToday() ? "today so far" : `in the last ${S.days} days`}. Slowest: ${growth[growth.length - 1].name} (${((growth[growth.length - 1].g) * 100).toFixed(1)}%).` });
+  const hours = (H.hourly || []).filter(inCity); if (hours.length) { const hh = groupBy(hours, "hour"); const tot = Object.entries(hh).map(([h, rs]) => [+h, sum(rs, r => r.orders)]).sort((a, b) => b[1] - a[1]); const all = sum(tot, t => t[1]);
+    const lunch = sum(tot.filter(t => t[0] >= 12 && t[0] <= 14), t => t[1]) / all, dinner = sum(tot.filter(t => t[0] >= 19 && t[0] <= 22), t => t[1]) / all;
+    ins.push({ k: "Timing", h: `Peak hour is ${String(tot[0][0]).padStart(2, "0")}:00 IST`, p: `Lunch (12–3 pm) brings ${pct(lunch, 0)} of orders and dinner (7–11 pm) ${pct(dinner, 0)}. Staff kitchens and riders for those two bands.` }); }
+  const rm = (H.ratings || []).filter(inCity); if (rm.length) { const g = groupBy(rm, "late"); const avg = k => g[k] ? sum(g[k], r => r.rating * r.n) / sum(g[k], r => r.n) : null; const on = avg("On time"), late = avg("10+ min late");
+    if (on && late) ins.push({ k: "Ratings", h: `Late food costs ${(on - late).toFixed(1)} stars`, p: `On-time orders average ${on.toFixed(2)}★; orders more than 10 minutes late average ${late.toFixed(2)}★. Delivery speed is the biggest lever on ratings.` }); }
+  if (cur.goldAov && cur.nonGoldAov) ins.push({ k: "Gold", h: `Gold members place ${pct(cur.gold, 0)} of orders`, p: `Their average order is ${fmtINR(cur.goldAov, false)} vs ${fmtINR(cur.nonGoldAov, false)} for everyone else (${pct(Math.abs(cur.goldAov / cur.nonGoldAov - 1), 0)} ${cur.goldAov >= cur.nonGoldAov ? "higher" : "lower"}, since free delivery is included). They order far more often, see Customers.` });
+  if (cur.gmv) ins.push({ k: "Coupons", h: `Coupons cost ${pct(cur.discount / cur.gmv)} of GMV`, p: `${pct(cur.coupon, 0)} of orders used a coupon, ${fmtINR(cur.discount)} in discounts over the period.` });
+  const r1 = retentionAt(H.cohorts, 1), r3 = retentionAt(H.cohorts, 3);
+  if (r1 != null) ins.push({ k: "Retention", h: `${pct(r1, 0)} of new customers order again the next month`, p: `By month 3 it's ${pct(r3, 0)}. Most churn happens in the first weeks, so the second-order coupon matters most. See Customers.` });
+  const late = Object.entries(cityRows).map(([c, rs]) => ({ c, s: summarize(rs) })).filter(x => x.s.late != null).sort((a, b) => b.s.late - a.s.late);
+  if (late.length > 1) ins.push({ k: "Delivery", h: `${late[0].c} has the most late deliveries`, p: `${pct(late[0].s.late)} of orders arrive after the promised time there, against ${pct(late[late.length - 1].s.late)} in ${late[late.length - 1].c}.` });
+  const wk = byDay(dailyIn(0)).filter(p => p.d !== H.today); const we = wk.filter(p => [0, 6].includes(new Date(p.d + "T00:00:00Z").getUTCDay())), wd = wk.filter(p => ![0, 6].includes(new Date(p.d + "T00:00:00Z").getUTCDay()));
+  if (we.length && wd.length) ins.push({ k: "Weekends", h: `Weekends are ${pct(sum(we, p => p.orders) / we.length / (sum(wd, p => p.orders) / wd.length) - 1, 0)} busier`, p: "Average orders per day on Saturday and Sunday compared with weekdays." });
+  $("ov-insights").innerHTML = ins.map(i => `<div class="insight"><span class="k">${i.k}</span><span class="h">${i.h}</span><p>${i.p}</p></div>`).join("") || '<div class="empty">Insights appear once there is enough history.</div>';
+}
+
+// =============================================================== ORDERS
+function renderOrders() {
+  const H = S.H, cur = summarize(dailyIn(0)), prev = summarize(dailyIn(1));
+  $("or-kpis").innerHTML = kpiHTML([
+    { label: "Orders", value: compact(cur.orders), delta: delta(cur.orders, prev.orders) },
+    { label: "Delivered", value: pct(cur.delivered / cur.orders), sub: `${compact(cur.delivered)} orders` },
+    { label: "Items per order", value: cur.items ? cur.items.toFixed(2) : "–", delta: delta(cur.items, prev.items) },
+    { label: "Used a coupon", value: pct(cur.coupon), delta: delta(cur.coupon, prev.coupon, false, true) },
+    { label: "Cash on delivery", value: pct(cur.cod), delta: delta(cur.cod, prev.cod, true, true) },
+    { label: "Late deliveries", value: pct(cur.late), delta: delta(cur.late, prev.late, true, true) },
+  ]);
+  const s = byDay(dailyIn(0)), good = css("--good"), bad = css("--bad"), acc = css("--accent");
+  chart("or-daily", { type: "bar", data: { labels: s.map(p => p.d), datasets: [
+      { label: "Delivered", data: s.map(p => p.delivered), backgroundColor: hexA(good, .75), stack: "a" },
+      { label: "Cancelled", data: s.map(p => p.cancelled), backgroundColor: hexA(bad, .8), stack: "a" },
+      { label: "Still in progress", data: s.map(p => Math.max(0, p.orders - p.delivered - p.cancelled)), backgroundColor: hexA(css("--muted"), .35), stack: "a" }] },
+    options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { title: c => dayLabel(c[0].label), label: c => `${c.dataset.label}: ${fmtN(c.parsed.y)}` } } },
+      scales: { x: noGridX({ stacked: true, ticks: { maxTicksLimit: 8, callback(v) { return dayLabel(this.getLabelForValue(v)); } } }), y: { ...gridY(), stacked: true } } } });
+
+  const cx = (H.cancels || []).filter(inCity), cg = groupBy(cx, "reason");
+  const cItems = Object.entries(cg).map(([k, rs]) => ({ name: k, value: sum(rs, r => r.n) })).sort((a, b) => b.value - a.value);
+  const cTot = sum(cItems, i => i.value) || 1;
+  hbars("or-cancel", cItems.map(i => ({ name: i.name, value: i.value / cTot * 100, color: "var(--bad)" })), { fmt: v => v.toFixed(1) + "%" });
+  $("or-cancel-note").textContent = cItems.length ? `${fmtN(cTot)} cancelled orders. Restaurant-side reasons (closed, out of stock) are fixable with better menu availability data.` : "";
+
+  // heatmap dow x hour
+  const hr = (H.hourly || []).filter(inCity), days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const cell = {}; for (const r of hr) { const k = r.dow + "|" + r.hour; cell[k] = (cell[k] || 0) + r.orders; }
+  const max = Math.max(...Object.values(cell), 1);
+  let html = "<span></span>" + Array.from({ length: 24 }, (_, h) => `<span class="hl">${h % 3 === 0 ? String(h).padStart(2, "0") : ""}</span>`).join("");
+  for (const d of days) { html += `<span class="c">${d}</span>`; for (let h = 0; h < 24; h++) { const v = cell[d + "|" + h] || 0; const p = Math.pow(v / max, .8);
+      html += `<span class="h" title="${d} ${String(h).padStart(2, "0")}:00 · ${fmtN(v)} orders" style="background:color-mix(in oklab, var(--accent) ${Math.round(p * 100)}%, var(--surface-2));color:${p > .6 ? "var(--surface)" : "transparent"}"></span>`; } }
+  $("or-heat").innerHTML = hr.length ? html : '<span class="empty" style="grid-column:1/-1">No hourly data yet.</span>';
+
+  const bk = (H.basket || []).filter(inCity);
+  const items = groupBy(bk, "items"), bands = groupBy(bk, "band");
+  const iKeys = Object.keys(items).map(Number).sort((a, b) => a - b), bKeys = Object.keys(bands).map(Number).sort((a, b) => a - b);
+  const iTot = sum(bk, r => r.orders) || 1;
+  chart("or-items", { type: "bar", data: { labels: iKeys.map(k => k >= 5 ? "5+" : String(k)), datasets: [{ data: iKeys.map(k => sum(items[k], r => r.orders) / iTot * 100), backgroundColor: hexA(acc, .8), borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)}% of orders` } } }, scales: { x: noGridX({ title: { display: true, text: "items" } }), y: gridY(v => v + "%") } } });
+  chart("or-value", { type: "bar", data: { labels: bKeys.map(k => k >= 1500 ? "₹1500+" : `₹${k}`), datasets: [{ data: bKeys.map(k => sum(bands[k], r => r.orders) / iTot * 100), backgroundColor: hexA(css("--c3"), .8), borderRadius: 3 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => `₹${bKeys[c[0].dataIndex]}–${bKeys[c[0].dataIndex] + 99}`, label: c => `${c.parsed.y.toFixed(1)}% of orders` } } }, scales: { x: noGridX({ ticks: { maxTicksLimit: 8 } }), y: gridY(v => v + "%") } } });
+
+  const pay = groupBy(H.payments || [], "method"), pal = palette();
+  const pKeys = Object.keys(pay).sort((a, b) => sum(pay[b], r => r.orders) - sum(pay[a], r => r.orders));
+  chart("or-pay", { type: "doughnut", data: { labels: pKeys, datasets: [{ data: pKeys.map(k => sum(pay[k], r => r.orders)), backgroundColor: pal, borderColor: css("--surface"), borderWidth: 2 }] },
+    options: { cutout: "62%", plugins: { legend: { position: "right" }, tooltip: { callbacks: { label: c => `${c.label}: ${pct(c.parsed / sum(c.dataset.data))}` } } } } });
+
+  const dd = (H.delivery_dist || []).filter(inCity), dg = groupBy(dd, "bucket");
+  const dKeys = Object.keys(dg).map(Number).sort((a, b) => a - b), dTot = sum(dd, r => r.orders) || 1;
+  $("or-del-sub").textContent = cur.delivery ? `average ${cur.delivery.toFixed(1)} min · ${pct(cur.late)} late` : "delivered orders, minutes";
+  chart("or-delivery", { type: "bar", data: { labels: dKeys.map(k => k >= 90 ? "90+" : `${k}–${k + 4}`), datasets: [{ data: dKeys.map(k => sum(dg[k], r => r.orders) / dTot * 100), backgroundColor: dKeys.map(k => k >= 55 ? hexA(bad, .75) : k >= 45 ? hexA(css("--warn"), .7) : hexA(good, .7)), borderRadius: 3 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)}% of deliveries` } } }, scales: { x: noGridX({ title: { display: true, text: "minutes from order to door" } }), y: gridY(v => v + "%") } } });
+
+  const cp = groupBy(H.coupons || [], "coupon");
+  const rows = Object.entries(cp).map(([k, rs]) => { const o = sum(rs, r => r.orders), g = sum(rs, r => r.gmv), d = sum(rs, r => r.discount), gold = sum(rs.filter(r => r.is_gold), r => r.orders);
+    return { k, o, g, d, gold: gold / o }; }).sort((a, b) => (a.k === "No coupon") - (b.k === "No coupon") || b.o - a.o);
+  $("or-coupons").innerHTML = rows.map(r => `<tr><td class="strong">${esc(r.k)}</td><td class="r num">${compact(r.o)}</td><td class="r num">${fmtINR(r.g)}</td><td class="r num">${r.d ? fmtINR(r.d) : "–"}</td><td class="r num">${r.d ? fmtINR(r.d / r.o, false) : "–"}</td><td class="r num">${r.d ? pct(r.d / r.g) : "–"}</td><td class="r num">${pct(r.gold, 0)}</td></tr>`).join("");
+}
+
+// =============================================================== CUSTOMERS
+const SEG_INFO = {
+  Champions: ["Ordered in the last week and order often", "Reward them: early access, Gold upgrade offers", "good"],
+  Loyal: ["Regulars who ordered this month", "Upsell: new cuisines, bigger baskets", "good"],
+  New: ["First order in the last 30 days", "Onboard: second-order coupon within 7 days", "gold"],
+  "At risk": ["Used to order often, quiet for 1–3 months", "Win back: discount on their favourite restaurant", "warn"],
+  Hibernating: ["No order in over 90 days", "Re-activate with a strong offer, or let lapse", "bad"],
+  Occasional: ["Order now and then", "Nurture: timed lunch and dinner nudges", "neutral"],
+};
+function renderCustomers() {
+  const H = S.H, seg = (H.segments || []).filter(inCity), gs = (H.gold_split || []).filter(inCity);
+  const totalCust = sum(seg, r => r.customers), m = H.cust_monthly || [];
+  const lastM = m[m.length - 1], prevM = m[m.length - 2];
+  const r1 = retentionAt(H.cohorts, 1), r3 = retentionAt(H.cohorts, 3);
+  const gold = gs.filter(r => r.is_gold), non = gs.filter(r => !r.is_gold);
+  const gc = sum(gold, r => r.customers), nc = sum(non, r => r.customers);
+  const gSpend = gc ? sum(gold, r => r.gmv) / gc : null, nSpend = nc ? sum(non, r => r.gmv) / nc : null;
+  $("cu-kpis").innerHTML = kpiHTML([
+    { label: "Customers", value: compact(totalCust), sub: S.city === "All" ? "ordered at least once" : `in ${S.city}` },
+    { label: "Active last month", value: lastM ? compact(lastM.active) : "–", delta: lastM && prevM ? delta(lastM.active, prevM.active) : "", sub: lastM ? lastM.month : "" },
+    { label: "New last month", value: lastM ? compact(lastM.new) : "–", delta: lastM && prevM ? delta(lastM.new, prevM.new) : "" },
+    { label: "Month-1 retention", value: pct(r1, 0), sub: `month 3: ${pct(r3, 0)}` },
+    { label: "Orders per active customer", value: lastM ? lastM.opc.toFixed(2) : "–", sub: "per month" },
+    { label: "Gold members", value: pct(gc / ((gc + nc) || 1), 0), sub: gSpend && nSpend ? `spend ${(gSpend / nSpend).toFixed(1)}× more each` : "" },
+  ]);
+  const acc = css("--accent"), good = css("--good");
+  chart("cu-monthly", { type: "bar", data: { labels: m.map(r => r.month), datasets: [
+      { type: "bar", label: "Active customers", data: m.map(r => r.active), backgroundColor: hexA(acc, .55), borderRadius: 3, yAxisID: "y" },
+      { type: "line", label: "New customers", data: m.map(r => r.new), borderColor: good, backgroundColor: good, pointRadius: 2, borderWidth: 2, tension: .3, yAxisID: "y" }] },
+    options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtN(c.parsed.y)}` } } },
+      scales: { x: noGridX({ ticks: { callback(v) { const s = this.getLabelForValue(v); return new Date(s + "-01T00:00:00Z").toLocaleDateString("en-IN", { month: "short", timeZone: "UTC" }); } } }), y: gridY() } } });
+  const order = ["1", "2-3", "4-6", "7-12", "13-24", "25-50", "51+"], fq = Object.fromEntries((H.frequency || []).map(r => [r.band, r.customers]));
+  const fTot = sum(Object.values(fq)) || 1;
+  chart("cu-freq", { type: "bar", data: { labels: order.map(o => o + (o === "1" ? " order" : " orders")), datasets: [{ data: order.map(o => (fq[o] || 0) / fTot * 100), backgroundColor: hexA(css("--c3"), .8), borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)}% of customers` } } }, scales: { x: noGridX(), y: gridY(v => v + "%") } } });
+
+  // cohort triangle
+  const co = H.cohorts || [], cohorts = [...new Set(co.map(c => c.cohort))].sort().slice(-12), maxK = Math.min(11, Math.max(0, ...co.map(c => c.k)));
+  const look = {}; for (const c of co) look[c.cohort + "|" + c.k] = c;
+  let html = `<span class="c label">Cohort</span><span class="hl">size</span>` + Array.from({ length: maxK + 1 }, (_, k) => `<span class="hl">M${k}</span>`).join("");
+  for (const c of cohorts) { const size = (look[c + "|0"] || {}).size; html += `<span class="c">${new Date(c + "-01T00:00:00Z").toLocaleDateString("en-IN", { month: "short", year: "2-digit", timeZone: "UTC" })}</span><span class="hl num">${compact(size)}</span>`;
+    for (let k = 0; k <= maxK; k++) { const x = look[c + "|" + k]; if (!x) { html += "<span></span>"; continue; }
+      const p = x.retention; html += `<span class="h num" title="${c}: ${pct(p)} of ${fmtN(x.size)} still ordering in month ${k}" style="background:color-mix(in oklab, var(--good) ${Math.round(Math.pow(p, .7) * 90)}%, var(--surface-2));color:${p > .45 ? "var(--surface)" : "var(--ink)"}">${(p * 100).toFixed(0)}</span>`; } }
+  const heat = $("cu-cohorts"); heat.style.gridTemplateColumns = `70px 52px repeat(${maxK + 1}, minmax(34px, 1fr))`; heat.style.minWidth = `${130 + (maxK + 1) * 38}px`;
+  heat.innerHTML = cohorts.length ? html : '<span class="empty">Cohorts appear after the first batch run.</span>';
+
+  // segments
+  const sg = groupBy(seg, "segment"), order2 = ["Champions", "Loyal", "New", "Occasional", "At risk", "Hibernating"];
+  $("cu-segments").innerHTML = order2.filter(k => sg[k]).map(k => { const rs = sg[k], c = sum(rs, r => r.customers);
+    const w = f => sum(rs, r => r[f] * r.customers) / c; const [desc, act, tone] = SEG_INFO[k];
+    return `<div class="seg-card"><div class="top"><span class="name">${k}</span><span class="pill ${tone}">${pct(c / (totalCust || 1), 0)}</span></div>
+      <span class="big num">${compact(c)}</span><p>${desc}. Avg ${w("frequency").toFixed(1)} orders, ${fmtINR(w("spend"), false)} spent, last order ${w("recency").toFixed(0)} days ago.</p>
+      <p><strong style="color:var(--ink)">Action:</strong> ${act}</p></div>`; }).join("") || '<div class="empty">No segments yet.</div>';
+
+  // gold table
+  const row = (name, rs) => { const c = sum(rs, r => r.customers), o = sum(rs, r => r.orders), g = sum(rs, r => r.gmv); return `<tr><td class="strong">${name}</td><td class="r num">${compact(c)}</td><td class="r num">${c ? (o / c).toFixed(1) : "–"}</td><td class="r num">${c ? fmtINR(g / c, false) : "–"}</td><td class="r num">${o ? fmtINR(g / o, false) : "–"}</td></tr>`; };
+  $("cu-gold").innerHTML = `<thead><tr><th></th><th class="r">Customers</th><th class="r">Orders each</th><th class="r">Spend each</th><th class="r">Per order</th></tr></thead><tbody>${row("Gold members", gold)}${row("Non-members", non)}</tbody>`;
+  $("cu-gold-note").textContent = gSpend && nSpend ? `A Gold member is worth about ${(gSpend / nSpend).toFixed(1)}× a regular customer over their lifetime. Free delivery above ₹199 is the main perk.` : "";
+
+  $("cu-top").innerHTML = (H.top_customers || []).filter(inCity).slice(0, 15).map(c => `<tr><td><span class="strong">${esc(c.name || "Customer")}</span>${c.is_gold ? ' <span class="pill gold">Gold</span>' : ""}</td><td>${esc(c.city)}</td><td class="r num">${fmtN(c.orders)}</td><td class="r num">${fmtINR(c.gmv)}</td><td><span class="pill ${(SEG_INFO[c.segment] || [, , "neutral"])[2]}">${esc(c.segment)}</span></td><td class="r num">${c.last_order ? dayLabel(c.last_order) : "–"}</td></tr>`).join("") || '<tr><td colspan="6" class="empty">No customers in this selection.</td></tr>';
+}
+
+// =============================================================== RESTAURANTS
+function renderRestaurants() {
+  const H = S.H, prof = (H.restaurant_profile || []).filter(inCity);
+  const nRest = sum(prof, r => r.restaurants), orders = sum(prof, r => r.orders);
+  const rating = sum(prof.filter(r => r.rating != null), r => r.rating * r.orders) / (sum(prof.filter(r => r.rating != null), r => r.orders) || 1);
+  const hg = groupBy(prof, "health"), cnt = k => sum(hg[k] || [], r => r.restaurants);
+  const rests = (H.restaurants || []).filter(inCity);
+  const cancel = sum(rests, r => (r.cancel_rate || 0) * r.orders) / (sum(rests, r => r.orders) || 1);
+  $("re-kpis").innerHTML = kpiHTML([
+    { label: "Restaurants with orders", value: compact(nRest) },
+    { label: "Orders, 90 days", value: compact(orders), sub: nRest ? `${fmtN(orders / nRest)} per restaurant` : "" },
+    { label: "Avg rating", value: `${rating.toFixed(2)}<small>★</small>` },
+    { label: "Star partners", value: compact(cnt("Star")), sub: pct(cnt("Star") / (nRest || 1)) + " of partners" },
+    { label: "At risk", value: compact(cnt("At risk")), sub: "low rating or high cancellations" },
+    { label: "Top-40 cancel rate", value: pct(cancel) },
+  ]);
+  const q = ($("re-search").value || "").trim().toLowerCase(), key = $("re-sort").value;
+  const dir = key === "cancel_rate" || key === "delivery" ? 1 : -1;
+  const list = rests.filter(r => !q || (r.name + " " + r.cuisine + " " + r.locality).toLowerCase().includes(q))
+    .sort((a, b) => dir * ((a[key] ?? 0) - (b[key] ?? 0))).slice(0, 40);
+  const maxG = Math.max(...list.map(r => r.gmv), 1);
+  const tone = h => h === "Star" ? "good" : h === "At risk" ? "bad" : "neutral";
+  $("re-table").innerHTML = list.map((r, i) => `<tr><td class="num muted">${i + 1}</td><td><div class="strong">${esc(r.name)}${r.veg ? ' <span class="pill good">Veg</span>' : ""}</div><div class="sub">${esc(r.cuisine)} · ${esc(r.locality)}</div></td><td>${esc(r.city)}</td>
+      <td class="r num">${fmtN(r.orders)}</td><td><span class="num">${fmtINR(r.gmv)}</span><div class="bar-in"><i style="width:${(r.gmv / maxG * 100).toFixed(1)}%"></i></div></td>
+      <td class="r num">${r.rating ? r.rating.toFixed(2) : "–"}</td><td class="r num" style="color:${r.cancel_rate > .1 ? "var(--bad)" : "inherit"}">${pct(r.cancel_rate)}</td>
+      <td class="r num">${r.delivery ? r.delivery.toFixed(0) + "m" : "–"}</td><td class="r num">${fmtINR(r.cost_for_two, false)}</td><td><span class="pill ${tone(r.health)}">${esc(r.health)}</span></td></tr>`).join("") || '<tr><td colspan="10" class="empty">No restaurants match.</td></tr>';
+
+  const cz = groupBy((H.cuisines || []).filter(inCity), "cuisine");
+  const cItems = Object.entries(cz).map(([c, rs]) => ({ c, g: sum(rs, r => r.gmv), r: sum(rs, r => (r.rating || 0) * r.orders) / (sum(rs, r => r.orders) || 1) })).sort((a, b) => b.g - a.g);
+  const acc = css("--accent"), ink = css("--ink");
+  chart("re-cuisine", { type: "bar", data: { labels: cItems.map(i => i.c), datasets: [
+      { label: "GMV", data: cItems.map(i => i.g), backgroundColor: hexA(acc, .75), borderRadius: 3, yAxisID: "y" },
+      { type: "line", label: "Avg rating", data: cItems.map(i => i.r), borderColor: ink, backgroundColor: ink, pointRadius: 3, borderWidth: 0, showLine: false, yAxisID: "y2" }] },
+    options: { plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => c.dataset.yAxisID === "y2" ? `Rating: ${c.parsed.y.toFixed(2)}★` : `GMV: ${fmtINR(c.parsed.y)}` } } },
+      scales: { x: noGridX({ ticks: { autoSkip: false, maxRotation: 50, minRotation: 30 } }), y: gridY(v => fmtINR(v)), y2: { position: "right", min: 3, max: 4.5, grid: { display: false }, ticks: { callback: v => v.toFixed(1) + "★" } } } } });
+  const hk = ["Star", "Steady", "At risk"], col = { Star: css("--good"), Steady: css("--c8"), "At risk": css("--bad") };
+  chart("re-health", { type: "doughnut", data: { labels: hk, datasets: [{ data: hk.map(cnt), backgroundColor: hk.map(k => col[k]), borderColor: css("--surface"), borderWidth: 2 }] },
+    options: { cutout: "60%", plugins: { legend: { position: "right" } } } });
+
+  const bands = ["Under ₹300", "₹300–499", "₹500–799", "₹800+"], bg = groupBy(prof, "band");
+  $("re-bands").innerHTML = `<thead><tr><th>Cost for two</th><th class="r">Restaurants</th><th class="r">Orders</th><th class="r">GMV</th><th class="r">Rating</th><th class="r">Delivery</th></tr></thead><tbody>` +
+    bands.filter(b => bg[b]).map(b => { const rs = bg[b], o = sum(rs, r => r.orders); return `<tr><td class="strong">${b}</td><td class="r num">${fmtN(sum(rs, r => r.restaurants))}</td><td class="r num">${compact(o)}</td><td class="r num">${fmtINR(sum(rs, r => r.gmv))}</td><td class="r num">${(sum(rs, r => (r.rating || 0) * r.orders) / (o || 1)).toFixed(2)}</td><td class="r num">${(sum(rs, r => (r.delivery || 0) * r.orders) / (o || 1)).toFixed(1)}m</td></tr>`; }).join("") +
+    (() => { const v = groupBy(prof, r => r.veg ? "Pure veg" : "Serves non-veg"); return Object.entries(v).map(([k, rs]) => { const o = sum(rs, r => r.orders); return `<tr><td class="strong">${k}</td><td class="r num">${fmtN(sum(rs, r => r.restaurants))}</td><td class="r num">${compact(o)}</td><td class="r num">${fmtINR(sum(rs, r => r.gmv))}</td><td class="r num">${(sum(rs, r => (r.rating || 0) * r.orders) / (o || 1)).toFixed(2)}</td><td class="r num">${(sum(rs, r => (r.delivery || 0) * r.orders) / (o || 1)).toFixed(1)}m</td></tr>`; }).join(""); })() + "</tbody>";
+
+  const ch = (H.restaurant_changes || []).filter(inCity), cs = (H.change_summary || []).filter(inCity);
+  const priceUps = sum(cs.filter(c => c.change_type !== "Rating" && (c.avg_price_change || 0) > 0), c => c.changes);
+  const avgRise = sum(cs.filter(c => c.change_type !== "Rating"), c => (c.avg_price_change || 0) * c.changes) / (sum(cs.filter(c => c.change_type !== "Rating"), c => c.changes) || 1);
+  $("re-change-kpis").innerHTML = kpiHTML([
+    { label: "Price changes", value: fmtN(sum(cs.filter(c => c.change_type !== "Rating"), c => c.changes)), sub: avgRise ? `average ${avgRise > 0 ? "+" : ""}${fmtINR(avgRise, false)} for two` : "" },
+    { label: "Rating changes", value: fmtN(sum(cs.filter(c => c.change_type !== "Price"), c => c.changes)) },
+    { label: "Cities with price rises", value: fmtN(new Set(cs.filter(c => c.change_type !== "Rating" && (c.avg_price_change || 0) > 0).map(c => c.city)).size) },
+  ]);
+  $("re-changes").innerHTML = ch.slice(0, 15).map(c => { const up = c.new_cost > c.previous_cost, rup = c.new_rating > c.previous_rating;
+    return `<tr><td class="strong">${esc(c.name)}<div class="sub">${esc(c.cuisine)}</div></td><td>${esc(c.city)}</td><td><span class="pill ${c.change_type === "Rating" ? (rup ? "good" : "bad") : (up ? "warn" : "good")}">${esc(c.change_type)}</span></td>
+      <td class="r num">${c.previous_cost !== c.new_cost ? `${fmtINR(c.previous_cost, false)} → <b>${fmtINR(c.new_cost, false)}</b>` : fmtINR(c.new_cost, false)}</td>
+      <td class="r num">${c.previous_rating !== c.new_rating ? `${(+c.previous_rating).toFixed(1)} → <b>${(+c.new_rating).toFixed(1)}</b>` : (+c.new_rating).toFixed(1)}</td>
+      <td class="r num muted">${toIST(c.changed_at + (String(c.changed_at).endsWith("Z") ? "" : "Z")).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td></tr>`; }).join("")
+    || '<tr><td colspan="6" class="empty">No changes yet. The generator revises a few restaurants every 10 minutes and dbt records them on its next run.</td></tr>';
+  void priceUps;
+
+  const pts = rests.filter(r => r.rating != null);
+  chart("re-scatter", { type: "scatter", data: { datasets: [{ data: pts.map(r => ({ x: r.orders, y: r.rating, name: r.name, city: r.city })), backgroundColor: pts.map(r => r.health === "Star" ? hexA(css("--good"), .7) : r.health === "At risk" ? hexA(css("--bad"), .7) : hexA(acc, .55)), pointRadius: 4 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.raw.name} (${c.raw.city}): ${fmtN(c.raw.x)} orders, ${c.raw.y.toFixed(2)}★` } } },
+      scales: { x: { ...gridY(), title: { display: true, text: "orders, 90 days" } }, y: { grid: { color: css("--line") }, title: { display: true, text: "avg rating" }, ticks: { callback: v => v.toFixed(1) } } } } });
+}
+
+// =============================================================== REVIEWS
+function renderReviews() {
+  const H = S.H, cur = summarize(dailyIn(0)), prev = summarize(dailyIn(1)), rm = (H.ratings || []).filter(inCity);
+  const byR = groupBy(rm, "rating"), tot = sum(rm, r => r.n) || 1, share = k => sum(byR[k] || [], r => r.n) / tot;
+  const lg = groupBy(rm, "late"), avg = k => lg[k] ? sum(lg[k], r => r.rating * r.n) / sum(lg[k], r => r.n) : null;
+  $("rv-kpis").innerHTML = kpiHTML([
+    { label: "Avg rating", value: cur.rating ? `${cur.rating.toFixed(2)}<small>★</small>` : "–", delta: delta(cur.rating, prev.rating) },
+    { label: "Reviews", value: compact(cur.reviews), delta: delta(cur.reviews, prev.reviews) },
+    { label: "Review rate", value: pct(cur.reviewRate, 0), sub: "of delivered orders" },
+    { label: "5-star", value: pct(share(5), 0), sub: "last 90 days" },
+    { label: "1–2 star", value: pct(share(1) + share(2), 0), sub: "last 90 days" },
+    { label: "Cost of lateness", value: avg("On time") && avg("10+ min late") ? `−${(avg("On time") - avg("10+ min late")).toFixed(1)}<small>★</small>` : "–", sub: "10+ min late vs on time" },
+  ]);
+  const acc = css("--accent"), good = css("--good"), bad = css("--bad"), warn = css("--warn");
+  const starCol = [bad, hexA(bad, .7), hexA(warn, .8), hexA(good, .65), good];
+  chart("rv-dist", { type: "bar", data: { labels: ["1★", "2★", "3★", "4★", "5★"], datasets: [{ data: [1, 2, 3, 4, 5].map(k => share(k) * 100), backgroundColor: starCol, borderRadius: 4 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)}% of reviews` } } }, scales: { x: noGridX(), y: gridY(v => v + "%") } } });
+  const s = byDay(dailyIn(0)).filter(p => p.rating != null);
+  chart("rv-trend", { type: "line", data: { labels: s.map(p => p.d), datasets: [{ label: "Avg rating", data: s.map(p => p.rating), borderColor: acc, backgroundColor: hexA(acc, .12), fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => dayLabel(c[0].label), label: c => `${c.parsed.y.toFixed(2)}★ from ${fmtN(s[c.dataIndex].reviews)} reviews` } } },
+      scales: { x: noGridX({ ticks: { maxTicksLimit: 8, callback(v) { return dayLabel(this.getLabelForValue(v)); } } }), y: { grid: { color: css("--line") }, ticks: { callback: v => v.toFixed(2) + "★" } } } } });
+  const lk = ["On time", "Up to 10 min late", "10+ min late"];
+  chart("rv-late", { type: "bar", data: { labels: lk, datasets: [5, 4, 3, 2, 1].map(st => ({ label: st + "★", data: lk.map(k => { const rs = lg[k] || []; const t = sum(rs, r => r.n) || 1; return sum(rs.filter(r => r.rating === st), r => r.n) / t * 100; }), backgroundColor: starCol[st - 1], stack: "s" })) },
+    options: { indexAxis: "y", plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.x.toFixed(1)}%` } } }, scales: { x: { stacked: true, max: 100, grid: { color: css("--line") }, ticks: { callback: v => v + "%" } }, y: { stacked: true, grid: { display: false } } } } });
+  $("rv-late-note").textContent = avg("On time") ? `On time: ${avg("On time").toFixed(2)}★ · up to 10 min late: ${(avg("Up to 10 min late") || 0).toFixed(2)}★ · 10+ min late: ${(avg("10+ min late") || 0).toFixed(2)}★` : "";
+  const cz = groupBy(rm, "cuisine");
+  hbars("rv-cuisine", Object.entries(cz).map(([c, rs]) => ({ name: c, value: sum(rs, r => r.rating * r.n) / sum(rs, r => r.n) })).sort((a, b) => b.value - a.value), { fmt: v => v.toFixed(2) + "★", max: 5 });
+  renderReviewFeed();
+}
+function renderReviewFeed() {
+  const f = S.feed; const list = (f && f.reviews) || [];
+  const html = list.slice(0, 14).map(r => `<li><span class="t num">${toIST(r.event_time).toTimeString().slice(0, 5)}</span><div style="min-width:0"><div class="who">“${esc(r.review_text)}”</div><div class="what">${esc(r.city)}${r.delivery_minutes ? ` · delivered in ${Math.round(r.delivery_minutes)} min` : ""}</div></div><div><span class="stars">${stars(r.rating)}</span></div></li>`).join("");
+  for (const id of ["rv-feed", "lv-reviews"]) $(id).innerHTML = html || '<li class="empty">Waiting for reviews from Kafka…</li>';
+  $("rv-feed-src").textContent = S.mode === "demo" ? "Kafka · zomato.reviews" : "Kafka · zomato.reviews";
+}
+
+// =============================================================== RIDERS
+function renderRiders() {
+  const H = S.H, daily = (H.riders_daily || []).filter(inCity), byD = groupBy(daily, "d"), days = Object.keys(byD).sort();
+  const series = days.filter(d => d <= H.lastDay).map(d => ({ d, riders: sum(byD[d], r => r.active_riders), deliveries: sum(byD[d], r => r.deliveries) }));
+  const complete = series.filter(p => p.d <= H.lastFull);
+  const avgRiders = complete.length ? sum(complete, p => p.riders) / complete.length : null, avgDel = complete.length ? sum(complete, p => p.deliveries) / complete.length : null;
+  const veh = (H.riders_vehicle || []).filter(inCity), vg = groupBy(veh, "vehicle");
+  const totDel = sum(veh, r => r.deliveries), avgMin = sum(veh, r => r.avg_minutes * r.deliveries) / (totDel || 1), km = sum(veh, r => (r.km_per_delivery || 0) * r.deliveries) / (totDel || 1);
+  const fleet = sum((H.fleet || []).filter(inCity), r => r.riders);
+  $("ri-kpis").innerHTML = kpiHTML([
+    { label: "Fleet", value: compact(fleet), sub: "registered riders" },
+    { label: "Active per day", value: compact(avgRiders), sub: fleet ? pct(avgRiders / fleet, 0) + " of the fleet" : "" },
+    { label: "Deliveries per rider", value: avgRiders ? (avgDel / avgRiders).toFixed(1) : "–", sub: "per active day" },
+    { label: "Avg delivery", value: totDel ? `${avgMin.toFixed(1)}<small>min</small>` : "–" },
+    { label: "Distance", value: totDel ? `${km.toFixed(1)}<small>km</small>` : "–", sub: "per delivery" },
+  ]);
+  const acc = css("--accent"), c3 = css("--c3");
+  chart("ri-daily", { type: "bar", data: { labels: series.map(p => p.d), datasets: [
+      { type: "bar", label: "Deliveries", data: series.map(p => p.deliveries), backgroundColor: hexA(acc, .55), borderRadius: 3, yAxisID: "y" },
+      { type: "line", label: "Active riders", data: series.map(p => p.riders), borderColor: c3, backgroundColor: c3, pointRadius: 0, borderWidth: 2, tension: .3, yAxisID: "y2" }] },
+    options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { title: c => dayLabel(c[0].label), label: c => `${c.dataset.label}: ${fmtN(c.parsed.y)}` } } },
+      scales: { x: noGridX({ ticks: { maxTicksLimit: 8, callback(v) { return dayLabel(this.getLabelForValue(v)); } } }), y: gridY(), y2: { position: "right", grid: { display: false }, beginAtZero: true, ticks: { callback: v => compact(v) } } } } });
+  const ld = groupBy((H.riders_load || []).filter(inCity), "per_day"), lk = Object.keys(ld).map(Number).sort((a, b) => a - b), lt = sum((H.riders_load || []).filter(inCity), r => r.rider_days) || 1;
+  chart("ri-load", { type: "bar", data: { labels: lk.map(k => k >= 12 ? "12+" : String(k)), datasets: [{ data: lk.map(k => sum(ld[k], r => r.rider_days) / lt * 100), backgroundColor: hexA(c3, .75), borderRadius: 3 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.parsed.y.toFixed(1)}% of rider-days` } } }, scales: { x: noGridX({ title: { display: true, text: "deliveries in a day" } }), y: gridY(v => v + "%") } } });
+  $("ri-vehicle").innerHTML = `<thead><tr><th>Vehicle</th><th class="r">Riders</th><th class="r">Deliveries</th><th class="r">Share</th><th class="r">Avg min</th><th class="r">km each</th></tr></thead><tbody>` +
+    Object.entries(vg).map(([v, rs]) => ({ v, riders: sum(rs, r => r.riders), del: sum(rs, r => r.deliveries), min: sum(rs, r => r.avg_minutes * r.deliveries) / (sum(rs, r => r.deliveries) || 1), km: sum(rs, r => (r.km_per_delivery || 0) * r.deliveries) / (sum(rs, r => r.deliveries) || 1) }))
+      .sort((a, b) => b.del - a.del).map(r => `<tr><td class="strong">${esc(r.v)}</td><td class="r num">${fmtN(r.riders)}</td><td class="r num">${compact(r.del)}</td><td class="r num">${pct(r.del / (totDel || 1), 0)}</td><td class="r num">${r.min.toFixed(1)}</td><td class="r num">${r.km.toFixed(1)}</td></tr>`).join("") + "</tbody>";
+  const top = (H.riders_top || []).filter(inCity).sort((a, b) => b.deliveries - a.deliveries).slice(0, 15);
+  $("ri-top").innerHTML = top.map((r, i) => `<tr><td class="num muted">${i + 1}</td><td class="strong">${esc(r.name || "Rider")}</td><td>${esc(r.city)}</td><td>${esc(r.vehicle)}</td><td class="r num">${fmtN(r.deliveries)}</td><td class="r num">${(r.avg_minutes || 0).toFixed(1)}</td><td class="r num">${fmtN(r.distance_km)}</td><td class="r num">${r.rating ? r.rating.toFixed(1) + "★" : "–"}</td></tr>`).join("") || '<tr><td colspan="8" class="empty">No riders in this selection.</td></tr>';
+}
+
+// =============================================================== CITIES
+function renderCities() {
+  const H = S.H, cur = groupBy(dailyIn(0, false), "city"), prev = groupBy(dailyIn(1, false), "city");
+  const rows = H.cities.map(c => ({ c, s: summarize(cur[c] || []), p: summarize(prev[c] || []), series: byDay(cur[c] || []).map(p => p.orders) }));
+  const acc = css("--accent");
+  $("ci-cards").innerHTML = rows.map(r => `<button class="city-card ${S.city === r.c ? "sel" : ""}" data-city="${esc(r.c)}" aria-pressed="${S.city === r.c}">
+      <div class="top"><span class="name">${esc(r.c)}</span>${delta(r.s.gmv, r.p.gmv)}</div>
+      <span class="gmv num">${fmtINR(r.s.gmv)}</span>
+      <svg viewBox="0 0 100 34" preserveAspectRatio="none">${sparkPath(r.series, acc, 34)}</svg>
+      <div class="stats"><span>Orders<b>${compact(r.s.orders)}</b></span><span>Delivery<b>${r.s.delivery ? r.s.delivery.toFixed(1) + "m" : "–"}</b></span><span>Rating<b>${r.s.rating ? r.s.rating.toFixed(2) : "–"}</b></span></div></button>`).join("");
+  $("ci-cards").querySelectorAll(".city-card").forEach(b => b.addEventListener("click", () => setCity(S.city === b.dataset.city ? "All" : b.dataset.city)));
+  $("ci-table").innerHTML = rows.map(r => `<tr class="${S.city === r.c ? "hi" : ""}"><td class="strong">${esc(r.c)}</td><td class="r num">${compact(r.s.orders)}</td><td class="r num">${fmtINR(r.s.gmv)}</td><td class="r">${delta(r.s.gmv, r.p.gmv)}</td><td class="r num">${fmtINR(r.s.aov, false)}</td><td class="r num">${r.s.delivery ? r.s.delivery.toFixed(1) + "m" : "–"}</td><td class="r num">${pct(r.s.late)}</td><td class="r num">${r.s.rating ? r.s.rating.toFixed(2) : "–"}</td><td class="r num">${pct(r.s.cancel)}</td><td class="r num">${pct(r.s.gold, 0)}</td></tr>`).join("");
+  const hg = groupBy(H.hourly || [], "city"), pal = palette();
+  const show = S.city === "All" ? H.cities.slice(0, 6) : [S.city];
+  chart("ci-hours", { type: "line", data: { labels: Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0")), datasets: show.map((c, i) => { const rs = hg[c] || []; const t = sum(rs, r => r.orders) || 1; const byH = groupBy(rs, "hour");
+      return { label: c, data: Array.from({ length: 24 }, (_, h) => sum(byH[h] || [], r => r.orders) / t * 100), borderColor: pal[i % pal.length], pointRadius: 0, borderWidth: 2, tension: .35 }; }) },
+    options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { title: c => c[0].label + ":00 IST", label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}%` } } }, scales: { x: noGridX(), y: gridY(v => v + "%") } } });
+  const cz = groupBy(H.cuisines || [], "city");
+  $("ci-cuisine").innerHTML = `<thead><tr><th>City</th><th>#1 cuisine</th><th class="r">Share</th><th>#2</th><th>#3</th></tr></thead><tbody>` + H.cities.map(c => { const rs = (cz[c] || []).slice().sort((a, b) => b.gmv - a.gmv); const t = sum(rs, r => r.gmv) || 1;
+    return `<tr class="${S.city === c ? "hi" : ""}"><td class="strong">${esc(c)}</td><td>${esc(rs[0]?.cuisine)}</td><td class="r num">${rs[0] ? pct(rs[0].gmv / t, 0) : "–"}</td><td class="muted">${esc(rs[1]?.cuisine)}</td><td class="muted">${esc(rs[2]?.cuisine)}</td></tr>`; }).join("") + "</tbody>";
+}
+
+// =============================================================== ASK AI
+const AI = { status: null, examples: [], history: [] };
+const SUGGEST = ["Which city had the slowest deliveries last week?", "Top 5 restaurants in Mumbai by revenue", "How much do late deliveries hurt ratings?",
+  "Which coupons give the biggest discount per order?", "Which customer segment brings the most revenue?", "Which restaurants raised prices recently?"];
+async function initAsk() {
+  $("ask-chips").innerHTML = SUGGEST.map(q => `<button type="button" class="qchip">${esc(q)}</button>`).join("");
+  $("ask-chips").querySelectorAll(".qchip").forEach(b => b.addEventListener("click", () => { $("ask-q").value = b.textContent; runAsk(b.textContent); }));
+  $("ask-form").addEventListener("submit", e => { e.preventDefault(); runAsk($("ask-q").value); });
+  $("ask-q").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); runAsk($("ask-q").value); } });
+  if (S.mode === "demo") {
+    try { AI.examples = await getJSON("demo/ai_examples.json"); } catch {}
+    setAIStatus({ demo: true });
+  } else {
+    try { setAIStatus(await getJSON("api/ai/status", 5000)); } catch { setAIStatus({ available: false, reason: "status check failed" }); }
+  }
+}
+function setAIStatus(st) {
+  AI.status = st; const chip = $("ai-status"), setup = $("ai-setup");
+  if (st.demo) { chip.textContent = "Offline: saved answers"; setup.hidden = false;
+    setup.innerHTML = `<span><b>Offline mode: the example questions show saved answers.</b> With the stack running, any question goes to the AI model.</span>`; return; }
+  if (st.available && st.model_installed !== false) { chip.innerHTML = `<span class="dot ok"></span> ${esc(st.model)}`; setup.hidden = true; return; }
+  chip.innerHTML = `<span class="dot warn"></span> AI not connected`; setup.hidden = false;
+  setup.innerHTML = st.key_missing
+    ? `<b>Connect the Groq API in two steps:</b><span>1. Create a free API key at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>.</span>
+       <span>2. Paste it into <code>.env</code> as <code>AI_API_KEY=...</code>, then restart the website container (<code>docker compose restart web</code>).</span>`
+    : st.available
+    ? `<b>Groq is reachable but the model <code>${esc(st.model)}</code> isn't offered.</b> Set AI_MODEL in .env to a current Groq model (for example llama-3.3-70b-versatile).`
+    : `<b>Can't reach the Groq API.</b> <span class="muted">${esc(st.reason || "")}</span><span>Check your internet connection and the AI_API_KEY in .env.</span>`;
+}
+async function runAsk(q) {
+  q = (q || "").trim(); if (!q) return;
+  const btn = $("ask-btn"); btn.disabled = true; btn.textContent = "Thinking…";
+  $("ask-result").hidden = false; $("ask-answer").textContent = "Working on it…"; $("ask-answer").className = "answer";
+  $("ask-meta").textContent = ""; $("ask-table").innerHTML = ""; $("ask-sql").textContent = ""; $("ask-chart-box").hidden = true;
+  try {
+    let res;
+    if (S.mode === "demo") {
+      res = AI.examples.find(e => e.question.toLowerCase() === q.toLowerCase());
+      if (!res) throw new Error("Offline mode answers the example questions only. Start the stack to ask anything.");
+    } else {
+      const r = await fetch("api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q }) });
+      res = await r.json(); if (!r.ok) throw new Error(res.error || "The question couldn't be answered.");
+    }
+    showAnswer(res);
+    AI.history = [q, ...AI.history.filter(x => x !== q)].slice(0, 8);
+    $("ask-history").innerHTML = AI.history.map(h => `<button type="button">${esc(h)}</button>`).join("");
+    $("ask-history").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { $("ask-q").value = b.textContent; runAsk(b.textContent); }));
+  } catch (e) { $("ask-answer").textContent = e.message; $("ask-answer").className = "answer err"; }
+  finally { btn.disabled = false; btn.textContent = "Ask"; }
+}
+function showAnswer(res) {
+  $("ask-answer").textContent = res.answer; $("ask-answer").className = "answer";
+  $("ask-meta").textContent = `${res.rows.length} row${res.rows.length === 1 ? "" : "s"} · ${res.model}${res.seconds ? ` · ${res.seconds}s` : ""}`;
+  $("ask-sql").textContent = res.sql;
+  const fmtCell = v => typeof v === "number" ? (Number.isInteger(v) ? fmtN(v) : nf.format(+v.toFixed(2))) : esc(v);
+  $("ask-table").innerHTML = `<thead><tr>${res.cols.map(c => `<th>${esc(c.replace(/_/g, " "))}</th>`).join("")}</tr></thead><tbody>` +
+    res.rows.slice(0, 50).map(r => `<tr>${r.map(v => `<td class="${typeof v === "number" ? "r num" : ""}">${fmtCell(v)}</td>`).join("")}</tr>`).join("") + "</tbody>";
+  // auto chart: first text/date column as labels, first numeric column as values
+  const li = res.cols.findIndex((_, i) => res.rows.some(r => typeof r[i] === "string"));
+  const numeric = res.cols.map((_, i) => i).filter(i => i !== li && res.rows.length && res.rows.every(r => typeof r[i] === "number" || r[i] == null));
+  // chart the metric the question is about: question cue -> column-name pattern, in priority order
+  const q = (res.question || "").toLowerCase();
+  const cues = [[/revenue|sales|gmv|earn|money/, /revenue|gmv|amount|spend/], [/slow|fast|deliver|minute|time/, /minute|delivery|time/],
+    [/rating|star|review/, /rating|star/], [/discount|coupon/, /discount/], [/price|cost|raise/, /increase|change|diff/], [/price|cost/, /new_cost|cost|price/],
+    [/share|percent|%/, /share|pct|percent/], [/order/, /orders/]];
+  let vi = -1;
+  for (const [qc, colRe] of cues) { if (qc.test(q)) { vi = numeric.find(i => colRe.test(res.cols[i].toLowerCase())) ?? -1; if (vi >= 0) break; } }
+  if (vi < 0) vi = numeric[0] ?? -1;
+  if (li >= 0 && vi >= 0 && res.rows.length > 1 && res.rows.length <= 60) {
+    $("ask-chart-box").hidden = false;
+    const isDate = /^\d{4}-\d{2}-\d{2}/.test(String(res.rows[0][li])), acc = css("--accent");
+    chart("ask-chart", { type: isDate ? "line" : "bar", data: { labels: res.rows.map(r => String(r[li]).slice(0, 24)), datasets: [{ label: res.cols[vi].replace(/_/g, " "), data: res.rows.map(r => r[vi]),
+      backgroundColor: hexA(acc, .75), borderColor: acc, borderRadius: 4, pointRadius: 0, tension: .3, fill: isDate }] },
+      options: { indexAxis: !isDate && res.rows.length > 8 ? "y" : "x", plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { grid: { color: css("--line") } } } } });
+  }
+}
+async function loadDigest() {
+  let d;
+  if (S.mode === "demo") { const rv = (S.feed && S.feed.reviews) || [];
+    const words = { "Late delivery": ["late", "longer"], "Cold food": ["cold"], "Wrong order": ["wrong"], "Great taste": ["loved", "best", "tasty", "fresh"], "Small portions": ["portion", "small"] };
+    const counts = Object.entries(words).map(([k, ws]) => ({ theme: k, reviews: rv.filter(r => ws.some(w => (r.review_text || "").toLowerCase().includes(w))).length })).filter(x => x.reviews);
+    d = { reviews: rv.length, themes: counts, summary: null, summary_error: "Keyword themes from the latest reviews. With the AI connected, a written summary appears here." }; }
+  else { try { d = await getJSON("api/reviews/digest", 120000); } catch { return; } }
+  $("dg-summary").textContent = d.summary || d.summary_error || (d.reviews ? "" : "Waiting for reviews from Kafka…");
+  $("dg-summary").className = d.summary ? "digest" : "digest muted";
+  $("dg-src").textContent = `${d.reviews} latest reviews${d.model ? " · " + d.model : ""}`;
+  hbars("dg-themes", (d.themes || []).map(t => ({ name: t.theme, value: t.reviews, color: /Late|Cold|Wrong|Small|Packaging/.test(t.theme) ? "var(--bad)" : "var(--good)" })));
+}
+
+// =============================================================== PIPELINE
+const LAYERS = [["Bronze", "bronze/events", "Spark Streaming", "Every raw Kafka message, replayable (3-day retention)"],
+  ["Silver", "silver/orders", "Spark Streaming", "Parsed, validated, de-duplicated orders"], ["Silver", "silver/order_status · reviews · rider_locations", "Spark Streaming", "Lifecycle events, ratings and GPS pings"],
+  ["Silver", "silver/quarantine_orders", "Spark Streaming", "Rejected rows with the reason they failed"], ["Silver", "silver/orders_historical", "Spark backfill", "Up to billions of historical orders, one file per day"],
+  ["Gold", "gold/hist_agg_* · stream_agg_*", "Spark batch", "12 additive daily aggregates per source"], ["Gold", "gold.* in Postgres", "Spark batch (Airflow, 30 min)", "Serving tables for this site"],
+  ["Marts", "analytics.mart_*", "dbt (Airflow)", "Rankings, cohorts, segments, KPIs, with 20+ data tests"]];
+function renderPipeline() {
+  const H = S.H;
+  $("pl-flow").innerHTML = [["Generator", "orders, status, GPS, reviews"], ["Kafka", "4 topics"], ["Spark Streaming", "10 queries"], ["Delta Lake", "bronze · silver · gold"], ["Airflow", "4 DAGs"], ["dbt", "marts + tests"], ["Postgres", "serving"], ["This site", "FastAPI"]]
+    .map(([b, s], i, a) => `<div class="node"><b>${b}</b><span>${s}</span></div>${i < a.length - 1 ? '<span class="arrow" aria-hidden="true">→</span>' : ""}`).join("");
+  const r = H.refresh;
+  const q = H.quality || [], qTot = sum(q, x => x.n);
+  $("pl-kpis").innerHTML = kpiHTML([
+    { label: "Orders served", value: r ? compact(r.orders_served) : compact(sum(H.daily, x => x.orders)), sub: "history + stream" },
+    { label: "Data through", value: r ? dayLabel(r.data_through) : (H.lastDay ? dayLabel(H.lastDay) : "–") },
+    { label: "Last gold refresh", value: r ? toIST(r.refreshed_at + "Z").toTimeString().slice(0, 5) + "<small>IST</small>" : "–", sub: r ? `took ${Math.round(r.duration_s)} s` : "" },
+    { label: "Rejected events", value: compact(qTot), sub: "quarantined, all time" },
+    { label: "History", value: `${fmtN(new Set(H.daily.map(x => x.d)).size)}<small>days</small>`, sub: `${H.cities.length} cities` },
+  ]);
+  const reason = { missing_city: "Missing city", non_positive_amount: "Zero or negative amount", corrupt_payload: "Corrupt JSON", missing_order_id: "Missing order id", bad_timestamp: "Bad timestamp", future_timestamp: "Future timestamp" };
+  const qg = groupBy(q, "reason");
+  hbars("pl-quality", Object.entries(qg).map(([k, rs]) => ({ name: reason[k] || k, value: sum(rs, x => x.n), color: "var(--bad)" })).sort((a, b) => b.value - a.value));
+  const qd = groupBy(q, "d"), qdays = Object.keys(qd).sort();
+  chart("pl-quality-trend", { type: "bar", data: { labels: qdays, datasets: Object.keys(qg).map((k, i) => ({ label: reason[k] || k, data: qdays.map(d => sum((qd[d] || []).filter(x => x.reason === k), x => x.n)), backgroundColor: hexA(palette()[i + 2], .8), stack: "q" })) },
+    options: { plugins: { legend: { position: "bottom" } }, scales: { x: noGridX({ stacked: true, ticks: { callback(v) { return dayLabel(this.getLabelForValue(v)); } } }), y: { ...gridY(), stacked: true } } } });
+  $("pl-tables").innerHTML = LAYERS.map(l => `<tr><td><span class="pill ${l[0] === "Gold" || l[0] === "Marts" ? "gold" : l[0] === "Silver" ? "good" : "neutral"}">${l[0]}</span></td><td class="mono" style="font-size:12px">${esc(l[1])}</td><td>${esc(l[2])}</td><td class="muted">${esc(l[3])}</td></tr>`).join("");
+  renderPipes();
+}
+const ago = s => s == null ? "–" : s < 90 ? `${s}s ago` : s < 5400 ? `${Math.round(s / 60)}m ago` : s < 172800 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
+const QNAMES = { bronze_events: ["Bronze", "every raw event"], silver_orders: ["Silver", "orders, de-duplicated"], quarantine_orders: ["Quarantine", "rejected orders"],
+  silver_order_status: ["Silver", "status changes"], silver_rider_locations: ["Silver", "rider GPS"], silver_reviews: ["Silver", "reviews"],
+  rt_city_orders: ["Real-time", "city windows"], rt_cuisine_orders: ["Real-time", "cuisine windows"], rt_order_status: ["Real-time", "status windows"], rt_rider_activity: ["Real-time", "rider windows"], rt_late_risk: ["ML", "late-delivery scoring"] };
+function renderPipes() {
+  const L = S.live; if (!L) return;
+  const pipes = [...L.pipeline].sort((a, b) => (b.rps || 0) - (a.rps || 0)), bronze = pipes.find(p => p.query === "bronze_events");
+  $("pl-pipe-sum").textContent = bronze ? `${fmtN(bronze.rps)} events/s into bronze` : "live";
+  $("pl-pipes").innerHTML = pipes.length ? pipes.map(p => { const n = QNAMES[p.query] || [p.query, ""]; const cls = p.age_s < 60 ? "ok" : p.age_s < 180 ? "warn" : "bad";
+    return `<div class="pipe"><span class="dot ${cls}"></span><span>${esc(n[0])} <span class="muted">· ${esc(n[1])}</span></span><span class="rps num">${fmtN(p.rps)}/s</span><span class="age num">${ago(p.age_s)}</span></div>`; }).join("") : '<div class="empty">No streaming batches yet.</div>';
+}
+
+// =============================================================== LIVE
+function renderLive() {
+  const d = S.live; if (!d) return; const k = d.kpis;
+  const minutes = [...new Set(d.series.map(s => s.t))].sort(), byMin = new Map(minutes.map(t => [t, { orders: 0, gmv: 0 }])), cityTot = {};
+  for (const s of d.series) { const b = byMin.get(s.t); b.orders += s.orders; b.gmv += s.gmv; cityTot[s.city] = (cityTot[s.city] || 0) + s.orders; }
+  const vals = minutes.map(t => byMin.get(t)), acc = css("--accent"), good = css("--good");
+  const surging = d.cities.filter(c => c.surge).map(c => `${c.city}${c.event ? ` (${c.event.toLowerCase()})` : ""}`);
+  $("lv-kpis").innerHTML = kpiHTML([
+    { label: "Orders · 5 min", value: fmtN(k.orders_5m), spark: sparkPath(vals.map(v => v.orders), acc) },
+    { label: "GMV · 5 min", value: fmtINR(k.gmv_5m), spark: sparkPath(vals.map(v => v.gmv), good) },
+    { label: "Avg order value", value: fmtINR(k.aov_15m, false), sub: "last 15 min" },
+    { label: "Avg delivery", value: k.delivery_15m == null ? "–" : `${k.delivery_15m.toFixed(1)}<small>min</small>`, sub: surging.length ? `slower in ${surging.join(", ")}` : "last 15 min" },
+    { label: "Cancellations", value: pct(k.cancel_15m), sub: "of orders closed" },
+    { label: "Riders on the road", value: fmtN(k.riders), sub: "this minute" },
+  ]);
+  const top = Object.entries(cityTot).sort((a, b) => b[1] - a[1]).slice(0, 5).map(e => e[0]), groups = [...top, "Other"], pal = palette();
+  const labels = minutes.map(t => toIST(t).toTimeString().slice(0, 5));
+  const datasets = groups.map((g, i) => ({ label: g, fill: true, tension: .35, pointRadius: 0, borderWidth: 1.5, borderColor: pal[i], backgroundColor: hexA(pal[i], .28),
+    data: minutes.map(t => sum(d.series.filter(s => s.t === t && (g === "Other" ? !top.includes(s.city) : s.city === g)), s => s.orders)) }));
+  if (charts["lv-orders"] && charts["lv-orders"].data.datasets.length === datasets.length) { const c = charts["lv-orders"]; c.data.labels = labels; c.data.datasets.forEach((ds, i) => { ds.data = datasets[i].data; ds.label = datasets[i].label; }); c.update("none"); }
+  else chart("lv-orders", { type: "line", data: { labels, datasets }, options: { interaction: { mode: "index", intersect: false }, plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtN(c.parsed.y)}` } } },
+    scales: { x: noGridX({ ticks: { maxTicksLimit: 7 } }), y: { ...gridY(), stacked: true } } } });
+  const maxG = Math.max(...d.cities.map(c => c.gmv), 1);
+  $("lv-board").innerHTML = d.cities.map(c => `<tr><td class="strong">${esc(c.city)}${c.surge ? `<span class="surge" title="Demand and delivery times are up">${esc(c.event || "Slow deliveries")}</span>` : ""}</td><td class="r num">${fmtN(c.orders)}</td>
+    <td><span class="num">${fmtINR(c.gmv)}</span><div class="bar-in"><i style="width:${(c.gmv / maxG * 100).toFixed(1)}%"></i></div></td>
+    <td class="r num" style="color:${c.delivery >= 46 ? "var(--warn)" : "inherit"}">${c.delivery == null ? "–" : c.delivery.toFixed(0) + "m"}</td><td class="r num">${pct(c.cancel_rate)}</td></tr>`).join("");
+  const stages = [["ACCEPTED", "Accepted"], ["PREPARING", "Preparing"], ["RIDER_ASSIGNED", "Rider assigned"], ["PICKED_UP", "Picked up"], ["DELIVERED", "Delivered"], ["CANCELLED", "Cancelled"]];
+  const top0 = Math.max(d.funnel.ACCEPTED || 0, 1);
+  hbars("lv-funnel", stages.map(([k, n]) => ({ name: n, value: d.funnel[k] || 0, color: k === "CANCELLED" ? "var(--bad)" : "color-mix(in oklab, var(--good) 75%, var(--surface))" })), { max: top0 });
+  const inflight = (d.funnel.ACCEPTED || 0) - (d.funnel.DELIVERED || 0) - (d.funnel.CANCELLED || 0);
+  $("lv-funnel-foot").textContent = inflight > 0 ? `About ${fmtN(inflight)} orders accepted in this window are still on their way.` : "";
+  if (S.tab === "pipeline") renderPipes();
+}
+function renderFeed() {
+  const f = S.feed; if (!f) return; const list = $("lv-feed");
+  const seen = new Set([...list.querySelectorAll("li[data-id]")].map(li => li.dataset.id));
+  list.innerHTML = f.orders.length ? f.orders.slice(0, 12).map(o => { const items = (o.items || []).map(i => `${i.quantity > 1 ? i.quantity + "× " : ""}${i.item_name}`).join(", ");
+    return `<li data-id="${esc(o.order_id)}" class="${seen.size && !seen.has(o.order_id) ? "new" : ""}"><span class="t num">${toIST(o.event_time).toTimeString().slice(0, 8)}</span>
+      <div style="min-width:0"><div class="who">${esc(o.restaurant_name)}</div><div class="what">${esc(o.locality)}, ${esc(o.city)} · ${esc(items)}</div></div>
+      <div><div class="amt num">${fmtINR(o.total_amount, false)}</div><div class="tags"><span class="tag">${esc(o.payment_method === "Cash on Delivery" ? "COD" : o.payment_method)}</span>${o.is_gold ? '<span class="tag gold">GOLD</span>' : ""}${o.coupon_code ? `<span class="tag">${esc(o.coupon_code)}</span>` : ""}</div></div></li>`; }).join("")
+    : `<li class="empty">${f.connected ? "Waiting for orders…" : "Kafka feed is not connected yet."}</li>`;
+  $("lv-feed-src").textContent = S.mode === "demo" ? "Kafka · zomato.orders" : "Kafka · zomato.orders";
+  if (S.tab === "reviews" || S.tab === "live") renderReviewFeed();
+}
+
+// =============================================================== demo simulator (Live tab only)
+const SIM_CITIES = [["Delhi NCR", 20, ["Hauz Khas", "Saket", "Connaught Place"]], ["Mumbai", 18, ["Andheri West", "Bandra", "Powai"]], ["Bengaluru", 17, ["Koramangala", "Indiranagar", "HSR Layout"]],
+  ["Hyderabad", 12, ["Gachibowli", "Banjara Hills"]], ["Chennai", 8, ["T Nagar", "Adyar"]], ["Pune", 8, ["Koregaon Park", "Baner"]], ["Kolkata", 7, ["Park Street", "Salt Lake"]],
+  ["Ahmedabad", 4, ["Navrangpura", "Satellite"]], ["Jaipur", 3, ["C Scheme", "Malviya Nagar"]], ["Lucknow", 3, ["Hazratganj", "Gomti Nagar"]]];
+const SIM_MENU = { "Biryani": [["Chicken Dum Biryani", 299], ["Mutton Biryani", 399], ["Raita", 49]], "North Indian": [["Butter Chicken", 320], ["Dal Makhani", 240], ["Butter Naan", 50]],
+  "Pizza": [["Farmhouse Pizza", 399], ["Garlic Bread", 129]], "Chinese": [["Hakka Noodles", 180], ["Chilli Chicken", 240]], "South Indian": [["Masala Dosa", 120], ["Filter Coffee", 50]],
+  "Street Food": [["Pav Bhaji", 140], ["Vada Pav", 40]], "Desserts": [["Gulab Jamun", 90], ["Rasmalai", 120]], "Cafe": [["Cappuccino", 160], ["Club Sandwich", 220]] };
+const SIM_NAMES = ["Spice Darbar", "Royal Handi", "Urban Wok", "Desi Dhaba", "Tandoori Junction", "Bombay Chowpatty", "Saffron Rasoi", "Madras Tiffins", "Shahi Kebab House", "Zaika Biryani House", "Mirchi Oven", "Paradise Bistro"];
+const SIM_REVIEWS = { 5: ["Absolutely loved it!", "Hot, fresh and on time.", "Best biryani in town, hands down."], 4: ["Good food, slightly late.", "Tasty, decent portions."], 3: ["Average experience.", "Took longer than promised."], 2: ["Food arrived cold.", "Delivery was very late."], 1: ["Wrong order delivered.", "Never ordering from here again."] };
+const HOURLY = [0.30, 0.18, 0.10, 0.06, 0.05, 0.08, 0.15, 0.30, 0.45, 0.50, 0.55, 0.80, 1.30, 1.50, 1.10, 0.70, 0.60, 0.75, 1.00, 1.40, 1.60, 1.50, 1.10, 0.55];
+let seed = Date.now() % 4294967296; const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+const pickW = a => { let r = rnd() * sum(a, x => x[1]); for (const x of a) if ((r -= x[1]) <= 0) return x; return a[a.length - 1]; };
+// Seasonal events: heavy rain only where it is the rainy season this month (IST), otherwise dry-day spikes
+const RAIN_CHANCE = { Mumbai: { 6: .55, 7: .75, 8: .65, 9: .45 }, Pune: { 6: .35, 7: .55, 8: .45, 9: .35, 10: .05 },
+  Kolkata: { 5: .1, 6: .4, 7: .5, 8: .5, 9: .4, 10: .15 }, Bengaluru: { 5: .2, 6: .15, 7: .15, 8: .25, 9: .35, 10: .4, 11: .1 },
+  Hyderabad: { 6: .2, 7: .3, 8: .3, 9: .35, 10: .2 }, Chennai: { 9: .1, 10: .4, 11: .55, 12: .35 }, "Delhi NCR": { 7: .35, 8: .35, 9: .15 },
+  Lucknow: { 7: .35, 8: .35, 9: .2 }, Jaipur: { 7: .25, 8: .25, 9: .1 }, Ahmedabad: { 7: .35, 8: .3, 9: .15 } };
+const EVENTS = { "Heavy rain": [1.6, 12], "Cricket match night": [1.5, 3], "Festival evening": [1.4, 5], "Long weekend": [1.25, 2] };
+function pickEvent(now) {
+  const month = toIST(now).getMonth() + 1;
+  const rainy = SIM_CITIES.map(c => [c[0], (RAIN_CHANCE[c[0]] || {})[month] || 0]).filter(c => c[1] > 0);
+  if (rainy.length && rnd() < Math.min(.65, sum(rainy, c => c[1]) * .45)) return { city: pickW(rainy)[0], kind: "Heavy rain" };
+  return { city: pickW(SIM_CITIES)[0], kind: ["Cricket match night", "Festival evening", "Long weekend"][Math.floor(rnd() * 3)] };
+}
+const Sim = {
+  minutes: [], surge: { ...pickEvent(Date.now()), until: Date.now() + 150000 }, next: Date.now() + 150000, orders: [], reviews: [],
+  factor(c, t, i) { return this.surging(c, t) ? EVENTS[this.surge.kind][i] : (i === 0 ? 1 : 0); },
+  base() { return 3000 * Math.max(0.35, HOURLY[istNow().getHours()]); },
+  surging(c, t) { return this.surge.city === c && this.surge.until > t; },
+  minute(t, frac) { const m = { t, c: {} }; const w = sum(SIM_CITIES, c => c[1] * this.factor(c[0], t, 0));
+    for (const [c, cw] of SIM_CITIES) { const n = Math.max(0, Math.round(this.base() * frac * cw * this.factor(c, t, 0) / w * (1 + gauss() * .06)));
+      m.c[c] = { orders: n, gmv: n * (465 + gauss() * 18), del: 37 + gauss() * 1.5 + this.factor(c, t, 1) }; } return m; },
+  tick() { const now = Date.now(), start = Math.floor(now / 60000) * 60000;
+    if (!this.minutes.length) for (let i = 30; i >= 1; i--) this.minutes.push(this.minute(start - i * 60000, 1));
+    if (now > this.next) { this.surge = { ...pickEvent(now), until: now + 90000 + rnd() * 150000 }; this.next = now + 180000; }
+    const last = this.minutes[this.minutes.length - 1], cur = this.minute(start, (now - start) / 60000);
+    if (last.t === start) this.minutes[this.minutes.length - 1] = cur; else { this.minutes.push(cur); if (this.minutes.length > 31) this.minutes.shift(); } },
+  live() { this.tick(); const ms = this.minutes, l5 = ms.slice(-5), l15 = ms.slice(-15), now = Date.now();
+    const tot = (arr, f) => sum(arr, m => sum(Object.values(m.c), f));
+    const o15 = tot(l15, x => x.orders), g15 = tot(l15, x => x.gmv);
+    const cities = SIM_CITIES.map(([c]) => ({ city: c, orders: sum(l15, m => m.c[c].orders), gmv: sum(l15, m => m.c[c].gmv), delivery: sum(ms.slice(-10), m => m.c[c].del) / 10, cancel_rate: .045 + (this.surging(c, now) && this.surge.kind === "Heavy rain" ? .03 : 0) + gauss() * .004, surge: this.surging(c, now), event: this.surging(c, now) ? this.surge.kind : null })).sort((a, b) => b.gmv - a.gmv);
+    const fun = { ACCEPTED: o15 * .98, PREPARING: o15 * .975, RIDER_ASSIGNED: o15 * .95, PICKED_UP: o15 * .945, DELIVERED: o15 * .935, CANCELLED: o15 * .046 };
+    const eps = this.base() / 60 * 20;
+    return { kpis: { orders_5m: tot(l5, x => x.orders), gmv_5m: tot(l5, x => x.gmv), aov_15m: g15 / o15, delivery_15m: sum(cities, c => c.delivery * c.orders) / o15, cancel_15m: .046, riders: Math.round(this.base() * .62) },
+      series: ms.flatMap(m => SIM_CITIES.map(([c]) => ({ t: new Date(m.t).toISOString(), city: c, orders: m.c[c].orders, gmv: m.c[c].gmv }))), cities, funnel: fun,
+      pipeline: [["bronze_events", 1], ["silver_rider_locations", .62], ["silver_order_status", .31], ["rt_order_status", .31], ["rt_rider_activity", .62], ["silver_orders", .074], ["quarantine_orders", .074], ["rt_city_orders", .074], ["rt_cuisine_orders", .074], ["silver_reviews", .013]]
+        .map(([q, s]) => ({ query: q, rps: eps * s * (1 + gauss() * .05), age_s: Math.round(rnd() * 14) })) }; },
+  feed() { for (let i = 0, n = 2 + Math.floor(rnd() * 3); i < n; i++) { const [city, , locs] = pickW(SIM_CITIES), cz = Object.keys(SIM_MENU)[Math.floor(rnd() * 8)], menu = SIM_MENU[cz];
+      const items = menu.slice(0, 1 + Math.floor(rnd() * menu.length)).map(([n, p]) => ({ item_name: n, quantity: rnd() < .8 ? 1 : 2, unit_price: p })), sub = sum(items, x => x.quantity * x.unit_price);
+      const coupon = rnd() < .28 ? ["WELCOME60", "GOLD20", "TRYNEW", "SUPERSAVER"][Math.floor(rnd() * 4)] : null, gold = rnd() < .18;
+      this.orders.unshift({ order_id: Math.floor(rnd() * 1e12).toString(16), event_time: new Date().toISOString(), city, locality: locs[Math.floor(rnd() * locs.length)], restaurant_name: SIM_NAMES[Math.floor(rnd() * SIM_NAMES.length)],
+        items, total_amount: Math.round(sub * 1.05 + 10 + (gold ? 0 : 29) - (coupon ? Math.min(sub * .4, 100) : 0)), payment_method: pickW([["UPI", 55], ["Card", 18], ["Cash on Delivery", 12], ["Wallet", 10]])[0], coupon_code: coupon, is_gold: gold }); }
+    if (rnd() < .6) { const late = rnd() < .3, r = pickW(late ? [[1, 6], [2, 10], [3, 14], [4, 8], [5, 4]] : [[1, 1], [2, 2], [3, 5], [4, 12], [5, 20]])[0];
+      this.reviews.unshift({ event_time: new Date().toISOString(), city: pickW(SIM_CITIES)[0], rating: r, review_text: SIM_REVIEWS[r][Math.floor(rnd() * SIM_REVIEWS[r].length)], delivery_minutes: late ? 55 + rnd() * 15 : 30 + rnd() * 14 }); }
+    this.orders = this.orders.slice(0, 25); this.reviews = this.reviews.slice(0, 20); return { connected: true, orders: this.orders, reviews: this.reviews }; },
+};
+
+// =============================================================== MACHINE LEARNING
+const CLUSTER_INFO = {
+  "High-value regulars": ["Order often and spend the most", "Protect: priority support, early access, keep Gold renewed", "good"],
+  "Steady regulars": ["Frequent, recent customers with average baskets", "Grow basket size with combos and add-ons", "good"],
+  "Gold loyalists": ["Gold members with strong repeat behaviour", "Reward loyalty; upsell premium restaurants", "gold"],
+  "Dormant Gold members": ["Paid for Gold but have stopped ordering", "Membership win-back before renewal is lost", "warn"],
+  "Big-basket occasionals": ["Order rarely, but large baskets", "Group and party-order offers, festive bundles", "gold"],
+  "Recent joiners": ["Joined in the last few months, still forming a habit", "Second- and third-order offers", "neutral"],
+  "Occasional diners": ["Order now and then, smaller lifetime spend", "Weekend and meal-time nudges", "neutral"],
+  "Light users": ["Few orders so far", "Personalised recommendations", "neutral"],
+  "Drifting customers": ["Ordering less often than before", "Reminder with a modest coupon", "warn"],
+  "Lapsed customers": ["Have not ordered for a long time", "Win-back campaign or let go", "bad"],
+};
+function renderML() {
+  const M = S.ML; if (!M) return;
+  const models = M.models || [], sel = models.find(m => m.selected) || models[0], clusters = M.clusters || [];
+  const kSel = (M.k_selection || []).find(k => k.selected);
+  if (!sel && !clusters.length) {
+    $("ml-kpis").innerHTML = kpiHTML([{ label: "Models", value: "–", sub: "not trained yet: Airflow runs zomato_ml_training after the first backfill" }]); return;
+  }
+  const highNow = (M.risk_city || []).reduce((a, r) => a + r.orders * r.high_share, 0), scoredNow = sum(M.risk_city || [], r => r.orders);
+  $("ml-kpis").innerHTML = kpiHTML([
+    { label: "Best model", value: sel ? esc(sel.model.replace("Gradient-Boosted Trees", "GBT")) : "–", sub: sel ? `of ${models.length} algorithms` : "" },
+    { label: "ROC-AUC", value: sel ? sel.auc.toFixed(3) : "–", sub: "0.5 = guessing, 1 = perfect" },
+    { label: "Late orders caught", value: sel ? pct(sel.recall, 0) : "–", sub: sel ? `recall at threshold ${sel.threshold.toFixed(2)}` : "" },
+    { label: "Training orders", value: sel ? compact(sel.train_rows) : "–", sub: sel ? `${compact(sel.test_rows)} held out for testing` : "" },
+    { label: "High-risk live orders", value: scoredNow ? pct(highNow / scoredNow, 0) : "–", sub: scoredNow ? `of ${fmtN(scoredNow)} scored in 15 min` : "waiting for live orders" },
+    { label: "Customer clusters", value: kSel ? kSel.k : clusters.length || "–", sub: kSel ? `silhouette ${kSel.silhouette.toFixed(2)}` : "" },
+  ]);
+  $("ml-models").innerHTML = `<thead><tr><th>Algorithm</th><th class="r">ROC-AUC</th><th class="r">Accuracy</th><th class="r">Precision</th><th class="r">Recall</th><th class="r">F1</th><th class="r">Train time</th></tr></thead><tbody>` +
+    models.map(m => `<tr><td class="strong">${esc(m.model)}${m.selected ? ' <span class="pill good">selected</span>' : ""}</td><td class="r num">${m.auc.toFixed(3)}</td><td class="r num">${pct(m.accuracy)}</td><td class="r num">${pct(m.precision)}</td><td class="r num">${pct(m.recall)}</td><td class="r num">${m.f1.toFixed(3)}</td><td class="r num">${Math.round(m.train_seconds)} s</td></tr>`).join("") + "</tbody>";
+  if (sel) $("ml-models-note").textContent = `Label: delivered after the promised time (${pct(sel.base_late_rate)} of test orders). Precision, recall and F1 at each model's F1-optimal threshold. Features are known when the order is placed.`;
+  const pal = palette();
+  const rocBy = groupBy(M.roc || [], "model");
+  chart("ml-roc", { type: "line", data: { datasets: [
+      ...Object.entries(rocBy).map(([m, pts], i) => ({ label: `${m.replace("Gradient-Boosted Trees", "GBT")} (${(models.find(x => x.model === m) || {}).auc?.toFixed(3) ?? ""})`, data: pts.map(p => ({ x: p.fpr, y: p.tpr })), borderColor: pal[i], backgroundColor: pal[i], pointRadius: 0, borderWidth: 2, tension: .1 })),
+      { label: "Random guess", data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], borderColor: css("--muted"), borderDash: [4, 4], pointRadius: 0, borderWidth: 1 }] },
+    options: { parsing: false, plugins: { legend: { position: "bottom" } }, scales: { x: { type: "linear", min: 0, max: 1, title: { display: true, text: "false positive rate" }, grid: { display: false } }, y: { min: 0, max: 1, title: { display: true, text: "true positive rate" }, grid: { color: css("--line") } } } } });
+  const imp = (M.importance || []).slice(0, 10);
+  hbars("ml-imp", imp.map(i => ({ name: i.feature, value: i.importance * 100 })), { fmt: v => v.toFixed(1) + "%", color: "var(--c2)" });
+  const risk = M.risk_recent || [];
+  $("ml-risk").innerHTML = risk.map(r => `<tr><td class="num muted">${esc(String(r.order_id).slice(-8))}</td><td>${esc(r.city)}</td><td class="strong">${esc(r.restaurant_name || "")}<div class="muted" style="font-size:11px">${esc(r.cuisine || "")}</div></td><td class="r num">${r.promised_minutes} min</td>
+    <td class="r"><span class="pill ${r.risk_level === "High" ? "bad" : r.risk_level === "Medium" ? "warn" : "good"}">${pct(r.late_probability, 0)} · ${esc(r.risk_level)}</span></td></tr>`).join("") || '<tr><td colspan="5" class="empty">No live orders scored in the last 15 minutes.</td></tr>';
+  $("ml-risk-note").textContent = (M.risk_city || []).length ? "Highest average risk right now: " + M.risk_city.slice(0, 3).map(r => `${r.city} ${pct(r.avg_probability, 0)}`).join(", ") + "." : "";
+  const bc = M.by_city || [];
+  chart("ml-city", { type: "bar", data: { labels: bc.map(r => r.city), datasets: [
+      { label: "Actual", data: bc.map(r => r.actual_late_rate * 100), backgroundColor: hexA(css("--bad"), .7), borderRadius: 3 },
+      { label: "Predicted (avg probability)", data: bc.map(r => r.predicted_late_rate * 100), backgroundColor: hexA(css("--c2"), .75), borderRadius: 3 }] },
+    options: { plugins: { legend: { position: "bottom" }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(1)}%` } } }, scales: { x: noGridX({ ticks: { autoSkip: false, maxRotation: 45 } }), y: gridY(v => v + "%") } } });
+  if (sel) {
+    const tot = sel.tp + sel.fp + sel.fn + sel.tn, cell = (v, good) => `<div class="h" style="height:64px;font-size:13px;background:${hexA(good ? css("--good") : css("--bad"), .12 + .5 * v / tot)}">${compact(v)}<br>${pct(v / tot, 1)}</div>`;
+    $("ml-cm-sub").textContent = `${sel.model}, threshold ${sel.threshold.toFixed(2)}`;
+    $("ml-cm").innerHTML = `<div class="heat" style="grid-template-columns:120px 1fr 1fr"><span></span><span class="hl">Predicted on time</span><span class="hl">Predicted late</span>
+      <span class="c">Actually on time</span>${cell(sel.tn, true)}${cell(sel.fp, false)}<span class="c">Actually late</span>${cell(sel.fn, false)}${cell(sel.tp, true)}</div>`;
+    $("ml-cm-note").textContent = `Of the orders flagged as likely late, ${pct(sel.precision, 0)} really were late; the model caught ${pct(sel.recall, 0)} of all late deliveries.`;
+  }
+  const cTot = sum(clusters, c => c.customers);
+  $("ml-cl-sub").textContent = clusters.length ? `${fmtN(cTot)} customers, k = ${clusters.length} (chosen by silhouette)` : "";
+  $("ml-clusters").innerHTML = clusters.map(c => { const [desc, act, tone] = CLUSTER_INFO[c.cluster_name] || ["", "", "neutral"];
+    return `<div class="seg-card"><div class="top"><span class="name">${esc(c.cluster_name)}</span><span class="pill ${tone}">${pct(c.customer_share, 0)}</span></div>
+      <span class="big num">${compact(c.customers)}</span><p>${desc}. Avg ${c.avg_orders.toFixed(1)} orders, ${fmtINR(c.avg_spend, false)} spent, last order ${c.avg_recency_days.toFixed(0)} days ago, ${pct(c.gold_share, 0)} Gold.</p>
+      <p><strong style="color:var(--ink)">${pct(c.revenue_share, 0)} of revenue.</strong> ${act}.</p></div>`; }).join("") || '<div class="empty">Clusters appear after the first training run.</div>';
+  const cross = M.cluster_vs_rfm || [], segs = ["Champions", "Loyal", "New", "Occasional", "At risk", "Hibernating"].filter(sg => cross.some(r => r.rfm_segment === sg));
+  const names = clusters.map(c => c.cluster_name), acc = css("--accent");
+  $("ml-cross").style.gridTemplateColumns = `150px repeat(${segs.length}, minmax(64px, 1fr))`;
+  $("ml-cross").innerHTML = cross.length ? `<span></span>${segs.map(sg => `<span class="hl">${sg}</span>`).join("")}` + names.map(n => { const rs = cross.filter(r => r.cluster_name === n), t = sum(rs, r => r.customers) || 1;
+    return `<span class="c strong">${esc(n)}</span>` + segs.map(sg => { const v = sum(rs.filter(r => r.rfm_segment === sg), r => r.customers) / t; return `<div class="h" style="background:${hexA(acc, .06 + v * .85)};color:${v > .55 ? "#fff" : "inherit"}">${v ? pct(v, 0) : ""}</div>`; }).join(""); }).join("") : '<div class="empty">No comparison yet.</div>';
+  const ks = M.k_selection || [];
+  chart("ml-k", { type: "line", data: { labels: ks.map(k => "k = " + k.k), datasets: [{ label: "Silhouette", data: ks.map(k => k.silhouette), borderColor: css("--c2"), backgroundColor: ks.map(k => k.selected ? css("--accent") : css("--c2")), pointRadius: ks.map(k => k.selected ? 6 : 3), borderWidth: 2, tension: .2 }] },
+    options: { plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `silhouette ${c.parsed.y.toFixed(3)}` } } }, scales: { x: noGridX(), y: { grid: { color: css("--line") }, ticks: { callback: v => v.toFixed(2) } } } } });
+}
+async function mlLoop() {
+  try { S.ML = S.mode === "live" ? await getJSON("api/ml", 8000) : (S.ML || await getJSON("demo/ml.json", 8000)); if (S.tab === "ml") renderML(); } catch {}
+  setTimeout(mlLoop, S.tab === "ml" ? 10000 : 60000);
+}
+
+// =============================================================== data + loops
+async function getJSON(path, ms = 4000) {
+  const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms);
+  try { const r = await fetch(path, { signal: ctl.signal, cache: "no-store" }); if (!r.ok || !(r.headers.get("content-type") || "").includes("json")) throw new Error("not json"); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+function setMode(mode, ok = true) {
+  S.mode = mode; const s = $("status");
+  s.className = "status " + (mode === "live" ? (ok ? "live" : "") : "demo");
+  $("status-text").textContent = mode === "live" ? (ok ? "Live · warehouse connected" : "Reconnecting…") : "Offline · saved snapshot";
+  $("demo-note").hidden = mode !== "demo";
+  $("foot-links").style.display = mode === "demo" ? "none" : "contents";   // localhost tool links only make sense locally
+  $("foot-mode").textContent = mode === "live" ? "Zomato Analytics · reading Postgres and Kafka" : "Zomato Analytics · offline snapshot";
+}
+const RENDER = { ml: renderML, ask: () => loadDigest(), overview: renderOverview, orders: renderOrders, customers: renderCustomers, restaurants: renderRestaurants, reviews: renderReviews, riders: renderRiders, cities: renderCities, pipeline: renderPipeline, live: () => { renderLive(); renderFeed(); renderReviewFeed(); } };
+const NEEDS_HISTORY = new Set(["overview", "orders", "customers", "restaurants", "reviews", "riders", "cities"]);
+function render() {
+  const waiting = NEEDS_HISTORY.has(S.tab) && (!S.H || !S.H.lastDay);
+  $("preparing").hidden = !waiting;
+  document.querySelectorAll(".view").forEach(v => { if (v.dataset.tab === S.tab) v.style.opacity = waiting ? ".35" : ""; });
+  if (S.tab !== "live" && S.tab !== "ask" && S.tab !== "pipeline" && S.tab !== "ml" && waiting) return;
+  if (S.tab === "pipeline" && !S.H) return;
+  try { RENDER[S.tab](); } catch (e) { console.error(e); }
+  $("filters").style.visibility = S.tab === "live" || S.tab === "ask" || S.tab === "ml" ? "hidden" : "visible";
+  if (S.H && S.H.lastDay) $("through").textContent = S.H.today ? `data through today, ${istNow().toTimeString().slice(0, 5)} IST` : `data through ${dayLabel(S.H.lastDay)}`;
+}
+function syncToday() {   // Today needs today's orders in the warehouse (live mode, after the first gold refresh)
+  const b = $("f-today"), ok = !!S.H.today; b.disabled = !ok; b.hidden = S.mode === "demo";   // offline snapshot has no "today"
+  b.title = ok ? "Today so far, compared with the same weekday last week up to the same time" : "No orders for today in the warehouse yet";
+  if (!ok && S.days === 0) { S.days = 7; $("f-period").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.days === 7))); }
+}
+async function loadHistory() {
+  try { S.H = prep(S.mode === "live" ? await getJSON("api/history", 15000) : await getJSON("demo/history.json", 15000)); fillCities(); syncToday(); if (S.tab !== "live") render(); }
+  catch (e) { console.warn("history", e); if (S.mode === "live") setMode("live", false); }
+}
+async function liveLoop() {
+  try { S.live = S.mode === "live" ? await getJSON("api/live") : Sim.live(); if (S.mode === "live") setMode("live", true); if (S.tab === "live") renderLive(); if (S.tab === "pipeline") renderPipes(); }
+  catch { if (S.mode === "live") setMode("live", false); }
+  setTimeout(liveLoop, 5000);
+}
+async function feedLoop() {
+  try { S.feed = S.mode === "live" ? await getJSON("api/feed") : Sim.feed(); if (S.tab === "live") { renderFeed(); renderReviewFeed(); } if (S.tab === "reviews") renderReviewFeed(); } catch {}
+  setTimeout(feedLoop, 2000);
+}
+
+// =============================================================== navigation + filters
+function fillCities() {
+  const sel = $("f-city"), cur = S.city;
+  sel.innerHTML = '<option value="All">All cities</option>' + S.H.cities.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  if (![...sel.options].some(o => o.value === cur)) S.city = "All";
+  sel.value = S.city;
+}
+function setCity(c) { S.city = c; $("f-city").value = c; saveFilters(); render(); }
+function setTab(t, push = true) {
+  if (!TABS.some(x => x[0] === t)) t = "overview";
+  S.tab = t;
+  document.querySelectorAll(".view").forEach(v => v.hidden = v.dataset.tab !== t);
+  document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  if (push) { try { history.replaceState(null, "", "#" + t); } catch {} }
+  render();
+}
+function initNav() {
+  $("tabs").innerHTML = TABS.map(([k, n]) => `<button class="tab" role="tab" data-tab="${k}" aria-selected="false" aria-controls="v-${k}">${n}</button>`).join("");
+  $("tabs").querySelectorAll(".tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+  $("f-city").addEventListener("change", e => setCity(e.target.value));
+  $("f-period").querySelectorAll("button").forEach(b => { b.setAttribute("aria-pressed", String(+b.dataset.days === S.days));
+    b.addEventListener("click", () => { S.days = +b.dataset.days; saveFilters(); $("f-period").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); render(); }); });
+  $("re-search").addEventListener("input", () => S.tab === "restaurants" && renderRestaurants());
+  $("re-sort").addEventListener("change", () => renderRestaurants());
+  window.addEventListener("hashchange", () => setTab(location.hash.slice(1), false));
+}
+function tickClock() {
+  const d = istNow(), h = d.getHours();
+  $("clock").textContent = d.toTimeString().slice(0, 8);
+  $("meal").textContent = h >= 7 && h < 11 ? "Breakfast" : h >= 11 && h < 15 ? "Lunch rush" : h >= 15 && h < 19 ? "Evening snacks" : h >= 19 && h < 23 ? "Dinner rush" : "Late night";
+}
+function retheme() { chartDefaults(); Object.keys(charts).forEach(k => { charts[k].destroy(); delete charts[k]; }); render(); }
+
+function initTheme() {
+  const btn = $("theme-btn");
+  const sync = () => { const dark = document.documentElement.dataset.theme === "dark";
+    btn.textContent = dark ? "Light" : "Dark"; btn.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode"); };
+  btn.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;   // charts redraw via the existing observer
+    try { localStorage.setItem("za-theme", next); } catch {}
+    sync();
+  });
+  sync();
+}
+
+async function start() {
+  initTheme();
+  tickClock(); setInterval(tickClock, 1000);
+  chartDefaults(); initNav();
+  try { await getJSON("api/health", 2500); setMode("live"); } catch { setMode("demo"); }
+  initAsk();
+  setTab(location.hash.slice(1) || "overview", false);
+  await loadHistory();
+  (function poll() { setTimeout(async () => { await loadHistory(); poll(); },
+    S.mode !== "live" ? 3600000 : (S.H && S.H.lastDay ? 120000 : 20000)); })();
+  liveLoop(); feedLoop(); mlLoop();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+start();
+})();
+</script>

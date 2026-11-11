@@ -1,0 +1,87 @@
+version: 2
+
+models:
+  - name: mart_city_kpis
+    description: Daily KPIs per city with rolling 7-day GMV and week-over-week growth.
+    columns:
+      - name: order_date
+        tests: [not_null]
+      - name: city
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["Mumbai", "Delhi NCR", "Bengaluru", "Hyderabad", "Chennai", "Kolkata", "Pune",
+                       "Ahmedabad", "Jaipur", "Lucknow"]
+      - name: orders
+        tests: [not_null]
+
+  - name: mart_restaurant_rankings
+    description: 90-day restaurant leaderboard with health segment.
+    columns:
+      - name: restaurant_id
+        tests: [unique, not_null]
+      - name: health_segment
+        tests:
+          - accepted_values:
+              values: ["Star", "Steady", "At risk"]
+
+  - name: mart_cuisine_city
+    description: Cuisine GMV share per city.
+    columns:
+      - name: cuisine
+        tests: [not_null]
+
+  - name: mart_peak_hours
+    description: Hourly demand index per city (IST).
+    columns:
+      - name: hour_of_day
+        tests: [not_null]
+
+  - name: mart_rider_leaderboard
+    description: Rider leaderboard for the last 7 days.
+    columns:
+      - name: rider_id
+        tests: [unique, not_null]
+
+  - name: mart_data_quality
+    description: Quarantined events per day and reason.
+
+  - name: mart_customer_retention
+    description: Monthly cohort retention.
+    columns:
+      - name: cohort
+        tests: [not_null]
+      - name: month_number
+        tests: [not_null]
+
+  - name: mart_customer_segments
+    description: RFM customer segments per city with recommended CRM actions.
+    columns:
+      - name: segment
+        tests:
+          - accepted_values:
+              values: ["Champions", "Loyal", "New", "At risk", "Hibernating", "Occasional"]
+
+  - name: mart_rating_drivers
+    description: Average rating by lateness bucket and cuisine.
+    columns:
+      - name: late_bucket
+        tests:
+          - accepted_values:
+              values: ["On time", "Up to 10 min late", "10+ min late"]
+
+  - name: mart_restaurant_changes
+    description: Price and rating changes from the SCD2 snapshot of restaurants.
+    columns:
+      - name: restaurant_id
+        tests: [not_null]
+      - name: change_type
+        tests:
+          - accepted_values:
+              values: ["Price", "Rating", "Price and rating"]
+
+  - name: mart_kpi_history
+    description: Incremental daily KPI history per city (delete+insert on the last 3 days).
+    columns:
+      - name: order_date
+        tests: [not_null]
